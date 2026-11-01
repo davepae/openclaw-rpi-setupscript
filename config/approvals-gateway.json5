@@ -1,0 +1,4 @@
+// Host approvals document for the Pi (the Gateway host). Applied with:
+//   openclaw approvals set --gateway --stdin < approvals-gateway.json5
+// Every host command prompts; allow-always cannot suppress it; no answer = deny.
+{ version: 1, defaults: { security: "allowlist", ask: "always", askFallback: "deny", autoAllowSkills: false } }

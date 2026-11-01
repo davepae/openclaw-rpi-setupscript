@@ -1,0 +1,17 @@
+// Host approvals document for the lab exec node. Applied LOCALLY on the lab VM before pairing
+// (local exec approvals default to security "full" / ask "off" until set), and re-applied from
+// the Pi with:  openclaw approvals set --node lab-exec --stdin < approvals-lab-exec.json5
+// Allowlisted binaries run silently for the lab agent; anything else asks; no answer = deny.
+// strictInlineEval (in openclaw.json) still forces approval for python -c, node -e, sed, awk, find -exec.
+{
+  version: 1,
+  defaults: { security: "allowlist", ask: "on-miss", askFallback: "deny", autoAllowSkills: false },
+  agents: {
+    lab: {
+      allowlist: [
+        { pattern: "git" }, { pattern: "docker" }, { pattern: "make" },
+        { pattern: "ls" }, { pattern: "cat" }, { pattern: "rg" }, { pattern: "pnpm" }, { pattern: "npm" },
+      ],
+    },
+  },
+}

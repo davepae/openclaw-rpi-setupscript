@@ -1,0 +1,7 @@
+# Your settings (copy from config/settings.env.example); keep them local
+config/settings.env
+# Phase completion markers written by the scripts
+.state/
+# Backups and secrets never belong in git
+*.tar.gz
+.env

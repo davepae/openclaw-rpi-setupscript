@@ -1,0 +1,3 @@
+// Host approvals document for the desktop (computer-use) node: no shell at all.
+// computer still works (an explicit --commands allowlist would disable computer use instead).
+{ version: 1, defaults: { security: "deny", ask: "off", askFallback: "deny", autoAllowSkills: false } }

@@ -1,0 +1,11 @@
+// OPT-IN: makes /elevated usable from the Control UI (tier 4 on the Pi, tier 3 escalation to a node).
+// Verified in OpenClaw 2026.10.8 source: Control UI chat is provider "webchat"
+// (src/utils/message-channel-constants.ts) and Control UI / TUI clients carry no sender id
+// (src/gateway/server-methods/gateway-client-identity.ts), so only "*" can match.
+// `openclaw security audit` reports this as CRITICAL (tools.elevated.allowFrom.webchat.wildcard).
+// What limits it here: no chat channels exist, so "webchat" = authenticated, paired Control UI/TUI
+// operators only; builder and reader have elevated disabled per agent; the Pi's host approvals
+// document is ask:"always", askFallback:"deny", so every elevated command still needs your tap.
+{
+  tools: { elevated: { allowFrom: { webchat: ["*"] } } },
+}

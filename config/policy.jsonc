@@ -1,0 +1,19 @@
+// Drift policy for the Pi Gateway. Checked by `openclaw policy check --agent main` and by a
+// daily `openclaw policy watch --once` timer; hash-locked in plugins.entries.policy.config.
+{
+  "channels": {
+    "denyRules": [
+      { "id": "no-telegram", "when": { "provider": "telegram" }, "reason": "No chat channels on this Gateway." },
+      { "id": "no-discord",  "when": { "provider": "discord" },  "reason": "No chat channels on this Gateway." },
+      { "id": "no-slack",    "when": { "provider": "slack" },    "reason": "No chat channels on this Gateway." },
+      { "id": "no-whatsapp", "when": { "provider": "whatsapp" }, "reason": "No chat channels on this Gateway." },
+      { "id": "no-signal",   "when": { "provider": "signal" },   "reason": "No chat channels on this Gateway." }
+    ]
+  },
+  "network": { "privateNetwork": { "allow": false } },
+  "gateway": {
+    "exposure": { "allowNonLoopbackBind": false, "allowTailscaleFunnel": false },
+    "auth": { "requireAuth": true },
+    "controlUi": { "allowInsecure": false }
+  }
+}
