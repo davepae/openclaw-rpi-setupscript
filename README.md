@@ -31,6 +31,7 @@ Tailscale tailnet, and need your approval for every command that runs on the Pi 
 - [Configuration reference](#configuration-reference)
 - [Verifying the install](#verifying-the-install)
 - [Day-to-day operation](#day-to-day-operation)
+- [Backups](#backups)
 - [Optional: elevated mode](#optional-elevated-mode)
 - [Optional: self-hosted search (SearXNG and Firecrawl)](#optional-self-hosted-search-searxng-and-firecrawl)
 - [Troubleshooting](#troubleshooting)
@@ -194,7 +195,8 @@ Run every script with `sudo` from the repository folder, as your admin user. Eac
 | 6 | `pi/60-images.sh` | Builds `openclaw-sandbox`, `-common` (from your tag's `Dockerfile.common`) and `-dev` (toolchains, LibreOffice headless, python-docx/openpyxl/pptx/pypdf, poppler, pandoc, Carlito/Caladea fonts), then smoke-tests workspace ownership |
 | 7 | `pi/70-configure.sh` | Backs up and patches `openclaw.json` from `config/openclaw.patch.json5`, applies the Gateway approvals, enables and hash-locks the drift policy, prints `sandbox explain`, `exec-policy` and the security audit. **Rerun after any config change**, to re-lock the policy |
 | 8 | `pi/80-nodes.sh` + `lab/*.sh` | Optional lab VM: see [Lab VM](#lab-vm-optional-untested) |
-| 9 | `pi/90-timers.sh` | systemd user timers: weekly image rebuild plus sandbox recreate, daily backup, daily policy watch, weekly audit snapshot |
+| 9 | `pi/90-timers.sh` | systemd user timers: weekly image rebuild plus sandbox recreate, daily backup (14 days kept), daily policy watch, weekly audit snapshot |
+| 9b | `pi/95-backup-export.sh` | Optional: nightly encryption of each backup to your `age` public key, for another machine to pull. See [Backups](#backups). Skipped when `BACKUP_AGE_RECIPIENT` is empty |
 | 10 | `pi/99-verify.sh` | 34 automated checks, then prints the manual acceptance tests |
 
 ### Lab VM (optional, untested)
@@ -241,6 +243,8 @@ secret goes in this file.
 | `BUILD_BROWSER_IMAGE` | `0` | `1` builds OpenClaw's sandbox browser image from source. Untested on arm64 with rootless Docker |
 | `ENABLE_ELEVATED` | `0` | `1` allows `/elevated` from the Control UI. See below |
 | `LAB_SESSION_HOST` | `0` | `1` lets the lab exec node host whole agent sessions |
+| `BACKUP_AGE_RECIPIENT` | *(empty)* | The `age1…` public key from the machine that keeps your backup copies. Empty skips phase 9b |
+| `BACKUP_EXPORT_DIR` | `/var/backups/openclaw-export` | Where the encrypted copies wait to be pulled, readable by `ADMIN_USER` |
 | `LAB_USER`, `LAB_EXEC_NODE_NAME`, `LAB_DESKTOP_NODE_NAME`, `LAB_DNS_SERVERS` | see file | Lab VM settings |
 
 **Changing OpenClaw's config later:** change it with `oc config set …`, then run
@@ -291,9 +295,73 @@ journalctl _SYSTEMD_USER_UNIT=openclaw-gateway.service -f
 sudo -iu openclaw_user                # a shell as the agent user (PATH includes ~/.openclaw/bin)
 ```
 
-- **Backups:** the daily timer writes `~openclaw_user/backups`. **The archives include your API key and gateway token.** Copy them off the Pi and encrypt them, for example with `scp`, then `age -r <your key>`.
+- **Backups:** see [Backups](#backups). The archives include your API key and gateway token.
 - **Images:** rebuilt weekly so Debian and LibreOffice security fixes land.
 - **Approvals:** cards offer allow once, allow always and deny. There's no "allow for this session" option. To approve a long job once, have the agent write a script into the workspace, read it, and approve the single `bash` command that runs it.
+
+## Backups
+
+Three timers do the work. Only the last step, pulling the copies, runs on another machine.
+
+| When | Where | What |
+|---|---|---|
+| 02:30 (plus up to 30 minutes) | Pi, `openclaw-backup.timer` | `openclaw backup create --verify --output ~/backups`: config, state and agent databases, credentials and workspaces. Archives older than 14 days are deleted |
+| 04:15 | Pi, `openclaw-backup-export.timer` (phase 9b) | Encrypts each new archive to your `age` **public** key in `/var/backups/openclaw-export`, readable by your admin account. Encrypted copies whose original was deleted are removed |
+| Whenever you choose | Your other machine | `rsync` pulls only the encrypted copies it doesn't already have |
+
+Config-only snapshots taken by phase 7 go to `~/backups/config` and aren't exported.
+
+**Why it's built this way:** the archives contain every secret on the Pi. The Pi encrypts with a public key, so it can never decrypt its own exports. Only the machine that keeps the copies holds the private key, and nothing unencrypted leaves the Pi.
+
+### Set it up
+
+**1. On the machine that will keep the copies** (macOS shown; on Linux, use `sudo apt install age`):
+
+```bash
+brew install age
+mkdir -p ~/.config/age && age-keygen -o ~/.config/age/openclaw-backup.key
+chmod 600 ~/.config/age/openclaw-backup.key
+grep 'public key' ~/.config/age/openclaw-backup.key      # copy the age1... value
+```
+
+Keep a second copy of `openclaw-backup.key` somewhere safe, such as a password manager or offline storage. **Without it, the backups can't be decrypted.**
+
+**2. On the Pi:** put the public key in `config/settings.env`, then run phase 9b:
+
+```bash
+BACKUP_AGE_RECIPIENT="age1..."        # in config/settings.env
+sudo pi/95-backup-export.sh           # installs age, the export script and its timer, and encrypts existing backups
+ls -la /var/backups/openclaw-export
+```
+
+**3. On the other machine:** pull, then prove you can restore:
+
+```bash
+mkdir -p ~/Backups/openclaw
+rsync -av --ignore-existing <admin>@<pi>:/var/backups/openclaw-export/ ~/Backups/openclaw/
+age -d -i ~/.config/age/openclaw-backup.key "$(ls -t ~/Backups/openclaw/*.age | head -1)" | tar -tzf - | head
+```
+
+The last command should list paths like `…-openclaw-backup/manifest.json` and `…/payload/posix/home/openclaw_user/.openclaw/openclaw.json`. Run the pull on a schedule with cron or launchd if you like. The other machine keeps every copy it pulls, so prune it yourself, for example with `find ~/Backups/openclaw -name '*.age' -mtime +90 -delete`.
+
+### Check that it's running
+
+```bash
+sudo -u openclaw_user XDG_RUNTIME_DIR=/run/user/$(id -u openclaw_user) systemctl --user status openclaw-backup.service --no-pager | head -6
+systemctl status openclaw-backup-export.service --no-pager | head -6
+sudo ls -la /home/openclaw_user/backups /var/backups/openclaw-export
+```
+
+### Restore
+
+Decrypt and unpack on any machine with the private key to inspect or recover files:
+
+```bash
+mkdir -p /tmp/oc-restore
+age -d -i ~/.config/age/openclaw-backup.key <file>.tar.gz.age | tar -xzf - -C /tmp/oc-restore
+```
+
+Files sit under `…/payload/posix/<original absolute path>`, and `manifest.json` describes the archive. To restore a whole Pi, rebuild it with these scripts, stop the Gateway (`oc gateway stop`), copy `~/.openclaw` and the workspaces back into place as `openclaw_user`, keeping modes `700`/`600`, then start the Gateway and run `sudo pi/99-verify.sh`. This full-restore path hasn't been tested yet; the decrypt-and-list check above has.
 
 ## Optional: elevated mode
 
@@ -369,6 +437,7 @@ These problems all came up during the first real install and are handled in the 
 | Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI |
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed |
+| Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 9, 11 | Passed |
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
@@ -389,7 +458,7 @@ config/
   policy.jsonc                drift policy (hash-locked by phase 7)
   tailnet-policy.hujson       Tailscale tags and grants fragment
 images/Dockerfile.dev         sandbox dev image (toolchains plus Office/PDF tooling)
-pi/                           Pi phases 00–99 and the egress rules script
+pi/                           Pi phases 00–99 (95 = encrypted backup export) and the egress rules script
 lab/                          lab VM, exec node and desktop node scripts; lab/desktop/ is the container
 docs/runbook.md               end-to-end setup runbook
 docs/design.md                architecture and hardening design (v3)

@@ -4,7 +4,7 @@
 source "$(dirname "$0")/lib/common.sh"
 require_root
 from="00"; [[ "${1:-}" == "--from" ]] && from="$2"
-phases=(00-preflight 10-base 20-egress 30-docker 40-tailscale 50-openclaw 60-images 70-configure 90-timers 99-verify)
+phases=(00-preflight 10-base 20-egress 30-docker 40-tailscale 50-openclaw 60-images 70-configure 90-timers 95-backup-export 99-verify)
 for p in "${phases[@]}"; do
   n="${p%%-*}"; (( 10#$n < 10#$from )) && continue
   st="$BUNDLE_DIR/.state/$p"; [[ "$p" == 30-docker ]] && st="$BUNDLE_DIR/.state/30-docker-$OC_USER"
