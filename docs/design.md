@@ -326,7 +326,7 @@ openclaw approvals set --node lab-desktop --stdin <<'EOF'
 EOF
 ```
 
-Allowing `docker` on the lab node is equivalent to root on that VM — acceptable only because the VM is disposable and walled off.
+The lab runs Docker rootless under `oclab`, so allowing `docker` gives the agent that account's rights, not root on the VM, and the in-VM egress rules stay out of its reach short of a kernel exploit. The VM should still be disposable and, ideally, walled off by a VLAN or the hypervisor's firewall.
 
 **Verify after every change.**
 

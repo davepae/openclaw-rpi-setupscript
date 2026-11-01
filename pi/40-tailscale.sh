@@ -17,10 +17,17 @@ if ! tailscale status >/dev/null 2>&1; then
   tailscale up --ssh=false ${TAG:+--advertise-tags="$TAG"}
 fi
 
-# Let the OpenClaw Gateway (running as $OPERATOR) configure Serve without root — OpenClaw's own
-# Tailscale docs (2026.10.8, docs/gateway/tailscale.md) recommend exactly this.
-tailscale set --operator="$OPERATOR"
-ok "tailscale operator = $OPERATOR"
+# Pi: let the OpenClaw Gateway (running as $OPERATOR) configure Serve without root, as OpenClaw's
+# own Tailscale docs (2026.10.8, docs/gateway/tailscale.md) recommend.
+# Lab: pass "none". The lab needs no Serve, and an operator could change Tailscale settings
+# (exit node, Serve, Funnel) from the agent's account.
+if [[ "$OPERATOR" == none ]]; then
+  tailscale set --operator= || warn "could not clear the Tailscale operator; check with: tailscale debug prefs | grep -i operator"
+  ok "tailscale operator cleared (root only)"
+else
+  tailscale set --operator="$OPERATOR"
+  ok "tailscale operator = $OPERATOR"
+fi
 
 name="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')"
 ip4="$(tailscale ip -4 | head -1)"

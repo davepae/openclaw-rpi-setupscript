@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Lab VM (separate x86 box, Debian 13, own VLAN) — host baseline:
+# Lab VM (Debian 13; a VM on any x86 or arm64 host with snapshots, ideally on its own VLAN) — host baseline:
 #   lab user (no sudo), linger, cgroup delegation, rootless Docker, Tailscale,
-#   egress: internet + DNS + the Pi's tailnet IP only (no LAN, rest of tailnet blocked).
+#   egress: internet + DNS + the Pi's tailnet IP on 443 only (no LAN, rest of tailnet blocked).
 # Copy the whole bundle (with config/settings.env) to the VM and run: sudo lab/10-lab-host.sh
 source "$(dirname "$0")/../lib/common.sh"
 require_root
@@ -30,8 +30,8 @@ systemctl daemon-reload
 ok "lab user $LAB_USER ready"
 
 "$BUNDLE_DIR/pi/30-docker.sh" "$LAB_USER"
-"$BUNDLE_DIR/pi/40-tailscale.sh" "$LAB_USER" "$TS_TAG_LAB"
-"$BUNDLE_DIR/pi/20-egress.sh" "$LAB_USER" "$LAB_DNS_SERVERS" "$PI_TAILNET_IP"
+"$BUNDLE_DIR/pi/40-tailscale.sh" none "$TS_TAG_LAB"      # no Tailscale operator on the lab
+"$BUNDLE_DIR/pi/20-egress.sh" "$LAB_USER" "$LAB_DNS_SERVERS" "$PI_TAILNET_IP:443"   # Gateway over Serve only
 
 log "Check: lab user can reach the Pi's Gateway over the tailnet"
 if [[ -n "$PI_TAILNET_NAME" ]] && sudo -u "$LAB_USER" curl -s -m 10 -o /dev/null -w '%{http_code}\n' "https://$PI_TAILNET_NAME/"; then
