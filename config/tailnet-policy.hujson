@@ -1,0 +1,16 @@
+// Tailnet policy fragment — merge into your tailnet policy file (admin console > Access controls).
+// Replace you@example.com. Tags must be defined here BEFORE pi/40-tailscale.sh advertises them.
+// Result: only you reach the Pi (HTTPS for the Control UI, SSH for admin); the lab VM reaches only
+// the Pi's HTTPS (node connections via Tailscale Serve); only you reach the lab VM.
+{
+  "tagOwners": {
+    "tag:openclaw-pi":  ["you@example.com"],
+    "tag:openclaw-lab": ["you@example.com"],
+  },
+  "grants": [
+    { "src": ["you@example.com"],  "dst": ["tag:openclaw-pi"],  "ip": ["tcp:443", "tcp:22"] },
+    { "src": ["tag:openclaw-lab"], "dst": ["tag:openclaw-pi"],  "ip": ["tcp:443"] },
+    { "src": ["you@example.com"],  "dst": ["tag:openclaw-lab"], "ip": ["tcp:22", "tcp:3000-9999"] },
+    // Nothing grants tag:openclaw-pi or tag:openclaw-lab access to your other devices.
+  ],
+}

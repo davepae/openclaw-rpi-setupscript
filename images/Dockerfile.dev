@@ -1,0 +1,34 @@
+# openclaw-sandbox-dev:trixie-slim — the agent's working image.
+# Base: OpenClaw's common image (git, Node 24, pnpm, python3, Chromium libs), built from the
+# Dockerfile.common of your installed OpenClaw tag. Adds dev toolchains and Office/PDF tools.
+# Runs under readOnlyRoot + tmpfs /tmp,/var/tmp,/run, capDrop ALL, network none by default.
+ARG BASE=openclaw-sandbox-common:trixie-slim
+FROM ${BASE}
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential pkg-config make python3-venv python3-pip shellcheck sqlite3 unzip zip xz-utils \
+      libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
+      python3-docx python3-openpyxl python3-pypdf poppler-utils pandoc \
+      fonts-crosextra-carlito fonts-crosextra-caladea fonts-dejavu \
+  && rm -rf /var/lib/apt/lists/*
+
+# python-pptx: not confirmed in Debian 13 (flagged #10) — try apt, else a venv from PyPI at build time.
+RUN if apt-get update && apt-cache show python3-pptx >/dev/null 2>&1; then \
+      apt-get install -y --no-install-recommends python3-pptx; \
+    else \
+      python3 -m venv --system-site-packages /opt/office && /opt/office/bin/pip install --no-cache-dir python-pptx; \
+    fi && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/office/bin:${PATH}"
+
+# LibreOffice needs a writable profile; root is read-only, so point it at tmpfs.
+RUN printf '%s\n' '#!/bin/sh' \
+      'exec soffice --headless --norestore -env:UserInstallation=file:///tmp/lo-profile "$@"' \
+      > /usr/local/bin/office && chmod 755 /usr/local/bin/office
+
+# OpenClaw runs this image as --user 0:0 under rootless Docker (see openclaw.patch.json5);
+# root's home is on the read-only root, so put HOME and caches on the tmpfs.
+ENV HOME=/tmp XDG_CACHE_HOME=/tmp/.cache npm_config_cache=/tmp/.npm
+USER sandbox
+WORKDIR /home/sandbox
+CMD ["sleep", "infinity"]

@@ -1,0 +1,11 @@
+// Applied by pi/80-nodes.sh only after the desktop node is paired and its approvals deny shell.
+// The coding profile and the sandbox default list both exclude "computer"; allow it for lab only.
+{
+  agents: {
+    entries: {
+      lab: {
+        tools: { alsoAllow: ["computer"], sandbox: { tools: { alsoAllow: ["computer"] } } },
+      },
+    },
+  },
+}

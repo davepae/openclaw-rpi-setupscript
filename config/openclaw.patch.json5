@@ -1,0 +1,95 @@
+// Applied on top of the onboarded config with:  openclaw config patch --file <rendered>
+// Objects merge, arrays/scalars replace. Gateway auth token and model-provider auth are left
+// exactly as onboarding wrote them (env refs). Placeholders in @@...@@ come from config/settings.env.
+{
+  gateway: {
+    mode: "local",
+    bind: "loopback",
+    port: 18789,
+    auth: { mode: "token", allowTailscale: false },   // token required even on the tailnet
+    tailscale: { mode: "serve" },                       // tailnet-only HTTPS; Funnel stays off
+  },
+  // No channels block: no Telegram, Discord or any other chat surface.
+  commands: { restart: false },
+  worktreeRoot: "@@OC_HOME@@/worktrees",
+  worktreeMaxCount: 32,
+  cron: { triggers: { enabled: false } },
+  agents: {
+    defaults: {
+      model: { primary: "@@PRIMARY_MODEL@@" },
+      pdfModel: { primary: "@@PDF_MODEL@@" },
+      sandbox: {
+        mode: "all",
+        backend: "docker",
+        scope: "agent",
+        workspaceAccess: "rw",
+        docker: {
+          image: "openclaw-sandbox-dev:trixie-slim",
+          readOnlyRoot: true,
+          tmpfs: ["/tmp", "/var/tmp", "/run"],
+          network: "none",
+          capDrop: ["ALL"],
+          // Rootless Docker: container root = openclaw_user on the host (no capabilities).
+          // OpenClaw's default (--user <workspace uid:gid>) maps to a subordinate ID under rootless
+          // Docker and cannot write the bind-mounted workspace (src/agents/sandbox/docker-user.ts).
+          user: "0:0",
+          pidsLimit: @@SANDBOX_PIDS@@,
+          memory: "@@SANDBOX_MEMORY@@",
+          memorySwap: "@@SANDBOX_MEMORY@@",
+          cpus: @@SANDBOX_CPUS@@,
+        },
+        browser: { enabled: false, allowHostControl: false },
+        prune: { idleHours: 24, maxAgeDays: 7 },
+      },
+      subagents: { allowAgents: [] },
+    },
+    entries: {
+      main: {
+        workspace: "@@OC_HOME@@/workspace",
+        subagents: { allowAgents: ["builder", "reader", "lab"] },
+        // pdf is in no tool profile, and sandboxed agents also filter it — allow it in both layers.
+        // web_search/web_fetch run in the Gateway, not this sandbox (main's exec stays offline). main
+        // needs them anyway: a spawned child is capped at its requester's tools, so without them a
+        // reader spawned by main has no web access (verified in 2026.10.8 source and on the Pi).
+        tools: { alsoAllow: ["pdf"], sandbox: { tools: { alsoAllow: ["pdf", "web_search", "web_fetch"] } } },
+        // GitHub identity for main: set up in RUNBOOK phase 9 (needs a generated profileId first).
+      },
+      builder: {
+        workspace: "@@OC_HOME@@/workspace",
+        sandbox: { docker: { network: "bridge" } },     // behind the owner-match egress rules
+        tools: { elevated: { enabled: false } },
+      },
+      reader: {
+        workspace: "@@OC_HOME@@/reader",
+        sandbox: { workspaceAccess: "none" },
+        tools: {
+          // minimal profile: the coding profile would also hand reader cron, skill_workshop,
+          // session send/settings and more. Add back only what reading needs, in both layers.
+          profile: "minimal",
+          alsoAllow: ["web_search", "web_fetch", "pdf"],
+          sandbox: { tools: { alsoAllow: ["web_search", "web_fetch", "pdf"] } },
+          deny: ["group:runtime", "group:fs", "browser", "computer", "sessions_spawn"],
+          elevated: { enabled: false },
+        },
+      },
+      lab: {
+        workspace: "@@OC_HOME@@/lab",
+        tools: { exec: { host: "node", node: "@@LAB_EXEC_NODE_NAME@@", mode: "auto" } },
+      },
+    },
+  },
+  tools: {
+    profile: "coding",
+    deny: ["gateway", "plugins", "openclaw", "portal", "message"],
+    exec: { mode: "ask", strictInlineEval: true, grantExpiryDays: 30 },
+    // Elevated stays unavailable until you opt in with config/elevated.patch.json5 (allowFrom).
+    elevated: { enabled: true },
+    fs: { workspaceOnly: true },
+    sessions: { visibility: "agent" },
+    agentToAgent: { enabled: false },
+    web: { fetch: { ssrfPolicy: { dangerouslyAllowPrivateNetwork: false } } },
+  },
+  // Host browser wiring in the Gateway stays off: browsing, if wanted, goes through the sandbox
+  // browser container (agents.defaults.sandbox.browser), never a Chromium on the Gateway host.
+  browser: { enabled: false, ssrfPolicy: { dangerouslyAllowPrivateNetwork: false } },
+}
