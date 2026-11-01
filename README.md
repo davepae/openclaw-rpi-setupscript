@@ -301,7 +301,7 @@ sudo -iu openclaw_user                # a shell as the agent user (PATH includes
 
 ## Backups
 
-Three timers do the work. Only the last step, pulling the copies, runs on another machine.
+Two timers on the Pi do the work. Your other machine then pulls the encrypted copies whenever you choose.
 
 | When | Where | What |
 |---|---|---|
@@ -310,6 +310,8 @@ Three timers do the work. Only the last step, pulling the copies, runs on anothe
 | Whenever you choose | Your other machine | `rsync` pulls only the encrypted copies it doesn't already have |
 
 Config-only snapshots taken by phase 7 go to `~/backups/config` and aren't exported.
+
+Each archive includes `~/.openclaw/.env`, so it carries your model API key and gateway token, as well as `openclaw.json`, the state and agent databases, and the workspaces, including any virtual environments in them. This was confirmed by listing a decrypted archive on 2026-11-01.
 
 **Why it's built this way:** the archives contain every secret on the Pi. The Pi encrypts with a public key, so it can never decrypt its own exports. Only the machine that keeps the copies holds the private key, and nothing unencrypted leaves the Pi.
 
