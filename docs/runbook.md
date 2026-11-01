@@ -253,7 +253,20 @@ sudo pi/90-timers.sh
 
 Each timer has up to 30 minutes of random delay and catches up after downtime.
 
-**Backups (manual).** Archives include credentials. Pull them off the Pi from another machine and encrypt them, for example `scp` then `age -r <your key>`. Don't leave them only on the Pi.
+**Encrypted off-Pi copies (phase 9b).** Archives include credentials. On the machine that will keep the copies, create a key with `age-keygen -o ~/.config/age/openclaw-backup.key`, and keep a second copy of that file somewhere safe. Put its `age1…` public key in `BACKUP_AGE_RECIPIENT` in `config/settings.env`, then run:
+
+```bash
+sudo pi/95-backup-export.sh      # installs age, /usr/local/sbin/openclaw-backup-export and a 04:15 timer
+```
+
+Each night the Pi encrypts new archives into `/var/backups/openclaw-export`, readable by your admin account. Pull and test them from the other machine:
+
+```bash
+rsync -av --ignore-existing <admin>@<pi>:/var/backups/openclaw-export/ ~/Backups/openclaw/
+age -d -i ~/.config/age/openclaw-backup.key "$(ls -t ~/Backups/openclaw/*.age | head -1)" | tar -tzf - | head
+```
+
+The Pi only ever holds the public key, so it can't decrypt its own exports. The README's Backups section covers restore. Verified on 2026-11-01: a 12.7 MB archive was encrypted, pulled to a Mac and listed.
 
 **GitHub identity (manual, optional).** Create a bot account with a fine-grained token limited to chosen repositories, with branch protection on `main`. Set it up as OpenClaw's managed GitHub identity for `main`, which generates the `profileId`. Then run `openclaw config set agents.entries.main.tools.github.allowInSandbox true`. The security audit warns while that's enabled; that's expected.
 

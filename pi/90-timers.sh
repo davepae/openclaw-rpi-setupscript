@@ -51,5 +51,5 @@ chown -R "$OC_USER:$OC_USER" "$home/.config/systemd"
 as_user "$OC_USER" "systemctl --user daemon-reload && systemctl --user enable --now \
   openclaw-image-rebuild.timer openclaw-backup.timer openclaw-policy-watch.timer openclaw-audit.timer"
 as_user "$OC_USER" "systemctl --user list-timers 'openclaw-*' --no-pager"
-warn "Backups land in $home/backups and contain credentials: pull them off the Pi and encrypt them (RUNBOOK phase 9)."
+warn "Backups land in $home/backups and contain credentials. Set BACKUP_AGE_RECIPIENT and run pi/95-backup-export.sh to keep encrypted copies for another machine to pull."
 stamp 90-timers
