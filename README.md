@@ -356,14 +356,29 @@ sudo ls -la /home/openclaw_user/backups /var/backups/openclaw-export
 
 ### Restore
 
-Decrypt and unpack on any machine with the private key to inspect or recover files:
+**To look at or recover individual files**, decrypt and unpack on any machine that has the private key:
 
 ```bash
 mkdir -p /tmp/oc-restore
 age -d -i ~/.config/age/openclaw-backup.key <file>.tar.gz.age | tar -xzf - -C /tmp/oc-restore
 ```
 
-Files sit under `…/payload/posix/<original absolute path>`, and `manifest.json` describes the archive. To restore a whole Pi, rebuild it with these scripts, stop the Gateway (`oc gateway stop`), copy `~/.openclaw` and the workspaces back into place as `openclaw_user`, keeping modes `700`/`600`, then start the Gateway and run `sudo pi/99-verify.sh`. This full-restore path hasn't been tested yet; the decrypt-and-list check above has.
+Files sit under `…/payload/posix/<original absolute path>`, and `manifest.json` describes the archive.
+
+**To restore a whole Pi**, use OpenClaw's own restore. It verifies the archive and its databases, and it never writes over live state:
+
+```bash
+# On the rebuilt Pi, after copying the decrypted .tar.gz to /tmp
+oc backup restore /tmp/<file>.tar.gz --target /home/openclaw_user/restore    # target must not exist or must be empty
+```
+
+Activating the restore is a separate step while the Gateway is stopped (`oc gateway stop`):
+1. Move the restored state into place, using `manifest.json` as the map of what goes where.
+2. Run `oc doctor`.
+3. Reinstall plugins, because plugin `node_modules` aren't archived. For example, run `oc plugins install @openclaw/searxng-plugin --force`.
+4. Start the Gateway and run `sudo pi/99-verify.sh`.
+
+Approvals and other state roll back to the backup's time, so review pending approvals before you resume. See OpenClaw's [backup docs](https://docs.openclaw.ai/cli/backup). This full-restore path hasn't been tested on this build yet; the decrypt-and-list check above has.
 
 ## Optional: elevated mode
 
@@ -440,7 +455,7 @@ These problems all came up during the first real install and are handled in the 
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
-| Acceptance tests 1, 2, 3, 9, 11 | Passed |
+| Acceptance tests 1, 2, 3, 11 | Passed (test 9 not yet run) |
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
 | Lab VM (phase 8), desktop/computer-use node, sandbox browser image | **Not run yet** |
