@@ -16,7 +16,10 @@ chown -R "$OC_USER:$OC_USER" "$stage"; chmod 600 "$stage"/*
 oc() { as_user "$OC_USER" "openclaw $*"; }
 
 log "Backing up current config"
-oc "backup create --only-config --verify" || warn "config backup failed (continuing)"
+# Without --output, OpenClaw writes the archive to the current folder (the agent user's home).
+# Keep these config-only snapshots apart from the nightly full backups in ~/backups.
+install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$(user_home "$OC_USER")/backups" "$(user_home "$OC_USER")/backups/config"
+oc "backup create --only-config --verify --output \$HOME/backups/config" || warn "config backup failed (continuing)"
 
 log "Config patch (dry run, then apply)"
 oc "config patch --file '$stage/openclaw.patch.json5' --dry-run"

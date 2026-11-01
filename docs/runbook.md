@@ -247,7 +247,7 @@ sudo pi/90-timers.sh
 | Timer | When | Runs |
 | --- | --- | --- |
 | `openclaw-image-rebuild` | Sundays 03:00 | `60-images.sh --rebuild`, then `openclaw sandbox recreate --all --force` |
-| `openclaw-backup` | Daily 02:30 | `openclaw backup create --verify --output ~/backups --keep-daily 7 --keep-weekly 4` |
+| `openclaw-backup` | Daily 02:30 | `openclaw backup create --verify --output ~/backups`, then deletes local archives older than 14 days (`--keep-*` flags work only with `--to` uploads) |
 | `openclaw-policy-watch` | Daily 06:00 | `openclaw policy watch --agent main --once --json`; failure lands in the journal |
 | `openclaw-audit` | Mondays 05:00 | `openclaw security audit --deep --json` to `~/.local/state/openclaw-audit/latest.json` |
 

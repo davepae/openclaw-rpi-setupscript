@@ -39,7 +39,9 @@ EOF
 unit openclaw-image-rebuild "Sun *-*-* 03:00:00" \
   "\$HOME/.cache/openclaw-images/bundle/pi/60-images.sh --rebuild && $oc sandbox recreate --all --force"
 unit openclaw-backup "*-*-* 02:30:00" \
-  "$oc backup create --verify --output \$HOME/backups --keep-daily 7 --keep-weekly 4"
+  "$oc backup create --verify --output \$HOME/backups && find \$HOME/backups -maxdepth 1 -name \"*-openclaw-backup.tar.gz\" -mtime +13 -delete"
+# (--keep-daily/--keep-weekly apply only to uploads with --to <location>; local copies are pruned
+#  with find: 14 days of nightly archives. Config-only snapshots live in backups/config.)
 unit openclaw-policy-watch "*-*-* 06:00:00" \
   "$oc policy watch --agent main --once --json"
 unit openclaw-audit "Mon *-*-* 05:00:00" \
