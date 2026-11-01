@@ -4,7 +4,7 @@ Oct 30, 2026 · David Pae
 
 ## Before you start
 
-Seventeen scripts build everything in the v2 design: a Pi Gateway with rootless Docker sandboxes, an egress firewall, Tailscale Serve, the three-agent roster with Office/PDF tooling, a lab exec node and a computer-use desktop container. They're in this repository. The first real install took about an hour, image builds included. Every config file in the repository was patched and validated with the real OpenClaw 2026.10.8 CLI. On 2026-10-31 the Pi phases ran end to end on the Pi 5 and all 34 automated checks passed. The lab phase hasn't been run yet.
+The scripts in this repository build everything in the [design](design.md): a Pi Gateway with rootless Docker sandboxes, an egress firewall, Tailscale Serve, the three-agent roster with Office/PDF tooling, a lab exec node and a computer-use desktop container. The first real install took about an hour, image builds included. Every config file in the repository was patched and validated with the real OpenClaw 2026.10.8 CLI. On 2026-10-31 the Pi phases ran end to end on the Pi 5 and all 34 automated checks passed. The lab phase hasn't been run yet.
 
 **What you need**
 
@@ -15,10 +15,10 @@ Seventeen scripts build everything in the v2 design: a Pi Gateway with rootless 
 | Lab VM | Separate x86 host (not the NUC), Debian 13 VM, 4 vCPU / 8 GB / 60 GB, on its own VLAN, snapshot-capable |
 | pfSense | A VLAN or interface each for the Pi and the lab VM |
 | Tailscale | Tailnet admin access to edit the policy file |
-| Model provider | An OpenAI-compatible endpoint (`AUTH_CHOICE=custom`, key as `CUSTOM_API_KEY`). It can be a local server, such as llama.cpp on your LAN; then add its IP to `EGRESS_ALLOW_HOSTS`, allow it in pfSense, and set `CUSTOM_IMAGE_INPUT="0"` for a text-only model. `anthropic` and `openai` are also supported |
+| Model provider | An OpenAI-compatible endpoint (`AUTH_CHOICE=custom`, key as `CUSTOM_API_KEY`). It can be a local server, such as llama.cpp on your LAN; then add it to `EGRESS_ALLOW_HOSTS` as `ip:port`, allow it in pfSense, and set `CUSTOM_IMAGE_INPUT` to `"1"` if it accepts images or `"0"` if it's text-only. `anthropic` and `openai` are also supported |
 | Your devices | A browser on the tailnet for the Control UI; optional OpenClaw iOS/Android app for approvals |
 
-**Automated vs manual.** Scripts do the OS, users, firewall, Docker, OpenClaw, images, config, approvals, drift policy, timers and verification. You do six things by hand: pfSense rules, the tailnet policy, pasting two single-use join URLs, approving any pending node surface update, pairing your browser and phone, and the Control UI acceptance tests.
+**Automated vs manual.** Scripts do the OS, users, firewall, Docker, OpenClaw, images, config, approvals, drift policy, timers and verification. You do these by hand: the memory-cgroup boot setting if phase 0 asks for it, pfSense rules, the tailnet policy, turning on HTTPS for the tailnet, pasting the API key, pairing your browser and phone, creating the backup key on another machine, and the Control UI acceptance tests. The optional lab adds pasting two single-use join URLs and approving any pending node surface update.
 
 **Clone and configure (on the Pi and later on the lab VM)**
 
@@ -36,7 +36,7 @@ Building against the actual 2026.10.8 release (CLI, config schema and tagged sou
 | --- | --- | --- | --- |
 | 1 | Sandbox images are `*:trixie-slim` by default | Release tags (through v2026.10.9) default to `openclaw-sandbox:bookworm-slim`; `Dockerfile.common` defaults `BASE_IMAGE` to bookworm. Only `main` and the docs site have moved to trixie | Builds its own trixie base and passes `--build-arg BASE_IMAGE=openclaw-sandbox:trixie-slim`; config names the image explicitly |
 | 2 | Workspace ownership under rootless Docker is open (flag #2) | OpenClaw runs the container as `--user <workspace uid:gid>` by default (`src/agents/sandbox/docker-user.ts`). Under rootless Docker that host UID maps to a subordinate ID, so writes to the workspace fail | Sets `sandbox.docker.user: "0:0"` (container root = `openclaw_user` on the host, all caps dropped) and `HOME=/tmp` in the image; image build smoke-tests ownership |
-| 3 | Reader gets `group:web` and `pdf`; main reads PDFs | `pdf` is in no tool profile, and the sandbox's default tool list omits web tools and `pdf`, so sandboxed agents never see them | Adds `alsoAllow` for both layers: reader `group:web` + `pdf`, main `pdf` |
+| 3 | Reader gets `group:web` and `pdf`; main reads PDFs | `pdf` is in no tool profile, and the sandbox's default tool list omits web tools and `pdf`, so sandboxed agents never see them | Adds `alsoAllow` in both layers. `reader` is on the `minimal` profile plus `web_search`, `web_fetch` and `pdf`. `main` gets `pdf`, and `web_search` and `web_fetch` in its sandbox layer, because a child spawned by `main` can't exceed `main`'s tools |
 | 4 | `openclaw plugins enable cua-computer` as a setup step | Run on the Gateway host, that turns on control of the **Gateway's own desktop**. It belongs on the node | Enables it only inside the desktop-node container; `80-nodes.sh` unsets it on the Pi if found |
 | 5 | Elevated `allowFrom` key for the Control UI is unknown (flag #13) | The Control UI's provider is `webchat` and operator UI clients carry no sender ID, so only `webchat: ["*"]` matches. `security audit` rates that **critical** | Ships with elevated unavailable; `ENABLE_ELEVATED=1` applies `config/elevated.patch.json5` as a conscious choice |
 | 6 | Node joins with the gateway token (`--auth-from-env`) | No such flag. Nodes enroll with a single-use join URL (`openclaw devices join-code` → `openclaw connect`), which works through Tailscale Serve | Uses join codes; URLs are pasted at a prompt and passed via `--target-file` |
@@ -80,7 +80,7 @@ oc --version
 
 ## Phases at a glance
 
-`sudo ./install-pi.sh` runs Pi phases 0–7 and 9–10 in order. It skips any phase already done (markers in `.state/`) and pauses where you have work to do. `--from 60` redoes everything from phase 6 on. Phase 8 goes back and forth between the Pi and the lab VM, so you run it by hand.
+`sudo ./install-pi.sh` runs Pi phases 0–7, 9, 9b and 10 in order. It skips any phase already done (markers in `.state/`) and pauses where you have work to do. `--from 60` redoes everything from phase 6 on. Phase 8 goes back and forth between the Pi and the lab VM, so you run it by hand.
 
 | Phase | Script | Runs on | What it does | Your manual step |
 | --- | --- | --- | --- | --- |
@@ -96,8 +96,9 @@ oc --version
 | 8b | `pi/80-nodes.sh join` → `lab/20-exec-node.sh` | Pi → Lab VM | Exec node: local approvals, then enroll as a service | Paste the join URL |
 | 8c | `pi/80-nodes.sh join` → `lab/30-desktop-node.sh` | Pi → Lab VM | Desktop container: build, lock shell, enroll | Paste the join URL |
 | 8d | `pi/80-nodes.sh finish` | Pi | Node approvals from the Pi, lab pin, computer tool for lab | Approve any pending `computer.act` update |
-| 9 | `pi/90-timers.sh` | Pi | Weekly image rebuild, daily backup, daily drift check, weekly audit | GitHub identity; off-Pi backup copy |
-| 10 | `pi/99-verify.sh` | Pi | About 30 automated checks, then the manual test list | Run the 15 acceptance tests in the Control UI |
+| 9 | `pi/90-timers.sh` | Pi | Weekly image rebuild, daily backup (14 days kept), daily drift check, weekly audit | GitHub identity (optional) |
+| 9b | `pi/95-backup-export.sh` | Pi | Nightly encryption of backups to your `age` public key; skipped if `BACKUP_AGE_RECIPIENT` is empty | Create the key on another machine; pull copies with `rsync` |
+| 10 | `pi/99-verify.sh` | Pi | 34 automated checks, then the manual test list | Run the 15 acceptance tests in the Control UI |
 
 ## Phases in detail
 
@@ -179,7 +180,7 @@ sudo pi/70-configure.sh
 
 The script works in this order:
 
-1. Backs up the current config (`openclaw backup create --only-config --verify`).
+1. Backs up the current config to `~/backups/config` (`openclaw backup create --only-config --verify --output ~/backups/config`).
 2. Renders `config/openclaw.patch.json5` from settings, dry-runs it, applies it and validates it. This is the design doc's configuration plus the corrections above.
 3. Restarts the Gateway and applies the Gateway approvals document: `allowlist`, `ask: "always"`, `askFallback: "deny"`.
 4. Enables the bundled Policy plugin and installs `policy.jsonc` in main's workspace. The policy forbids chat channels, private-network access, a non-loopback bind, Funnel, a Gateway without auth and an insecure Control UI. The script runs `policy check` and hash-locks the result.
@@ -187,7 +188,7 @@ The script works in this order:
 
 With `ENABLE_ELEVATED=1` it also applies the elevated opt-in. Expect the audit to show that one critical finding and nothing else serious.
 
-**Pair your browser (manual).** Open `https://<PI_TAILNET_NAME>/` from your own device. Sign in with the gateway token (`sudo -u openclaw_user grep TOKEN ~openclaw_user/.openclaw/.env`), then approve the device on the Pi with `sudo -iu openclaw_user openclaw devices list` and `openclaw devices approve <id>`. For phone approvals, pair the OpenClaw app with `openclaw qr` and grant it `operator.approvals`.
+**Pair your browser (manual).** Open `https://<PI_TAILNET_NAME>/` from your own device. Sign in with the gateway token (`sudo -u openclaw_user grep TOKEN ~openclaw_user/.openclaw/.env`), then approve the device on the Pi with `oc devices list` and `oc devices approve <id>`. For phone approvals, pair the OpenClaw app with `openclaw qr` and grant it `operator.approvals`.
 
 ### Phase 8 — Lab VM and nodes
 
@@ -305,7 +306,7 @@ It then prints the audit findings and the manual tests below.
 
 ## Day-2 operations
 
-Run OpenClaw commands as the agent user: `sudo -iu openclaw_user openclaw …`.
+Run OpenClaw commands as the agent user with `oc …` from your admin account (installed by phase 5), or from a shell opened with `sudo -iu openclaw_user`.
 
 | Task | Command |
 | --- | --- |
@@ -313,12 +314,12 @@ Run OpenClaw commands as the agent user: `sudo -iu openclaw_user openclaw …`.
 | Revoke a standing grant | `openclaw approvals grants list`; `openclaw approvals grants revoke <id>` |
 | Cut the lab entirely | Lab VM: `sudo -iu oclab openclaw node stop`; `docker stop lab-desktop` |
 | Cut computer use only | Add `gateway.nodes.commands.deny: ["computer.act"]` (`openclaw config patch --stdin`) |
-| Turn elevated off again | `openclaw config unset tools.elevated.allowFrom`, then restart the Gateway |
+| Turn elevated off again | `oc config unset tools.elevated.allowFrom`, then `sudo pi/70-configure.sh` to restart and re-lock (setting `ENABLE_ELEVATED="0"` alone doesn't remove it) |
 | Rebuild images now | `sudo pi/60-images.sh --rebuild && sudo -iu openclaw_user openclaw sandbox recreate --all --force` |
 | Upgrade OpenClaw | Bump `OPENCLAW_VERSION` and check `NODE_VERSION` against the release's `engines`. On the Pi run `sudo ./install-pi.sh --from 50`; on the lab VM rerun `lab/20-exec-node.sh` with a fresh join URL and `lab/30-desktop-node.sh` (keeps pairing). Then `sudo pi/70-configure.sh` to re-lock the policy hashes |
-| Restore config | `openclaw backup verify <archive>`, then `openclaw backup restore` (see `openclaw backup --help`) |
+| Restore | `oc backup restore <archive> --target <empty dir>` verifies and extracts without touching live state. Activation is a separate step while the Gateway is stopped; see the README's Backups section |
 | Check for drift by hand | `openclaw policy check --agent main --json`; `openclaw security audit --deep` |
-| Logs | `journalctl --user -u openclaw-gateway -f` as `openclaw_user` (with `XDG_RUNTIME_DIR=/run/user/$(id -u)`) |
+| Logs | `journalctl _SYSTEMD_USER_UNIT=openclaw-gateway.service -f` from your admin account |
 | Reset the lab | Restore the VM snapshot, then rerun phase 8 with new join URLs. Remove old entries with `openclaw devices remove <id>` |
 
 ## Troubleshooting
@@ -350,7 +351,7 @@ These items were open before the first install. On 2026-10-31 the Pi phases ran 
 | 2 | Debian 13 package names in `Dockerfile.dev` and the desktop image (`gir1.2-gtk-3.0`, `libreoffice-*-nogui`, `python3-pypdf`) and whether `python3-pptx` exists (else PyPI venv) | **Pi images settled 2026-10-31:** they built in about 10 minutes (dev 3.28 GB, common 2.26 GB, base 350 MB). The desktop image still waits on the phase 8 build |
 | 3 | Size and LibreOffice memory under the 3 GB cap on arm64 | Phase 6 `docker image ls`; acceptance test 14 with your largest real file |
 | 4 | Owner-match rules catching all rootless container egress | **Settled 2026-10-31:** the bridge checks passed, builder reached the internet but not the LAN, and the `OC_EGRESS` reject counter went up |
-| 5 | `--user 0:0` with OpenClaw's write/edit helpers and pnpm in a read-only root | Acceptance test 1 plus a real coding task in main |
+| 5 | `--user 0:0` with OpenClaw's write/edit helpers and pnpm in a read-only root | **Partly settled 2026-10-31:** a coding task in `main` wrote files, ran git and a 298-test suite, and the files landed owned by `openclaw_user`. pnpm hasn't been exercised yet |
 | 6 | Sandbox browser image on arm64 under rootless Docker (needs host-published CDP ports) | Only if `BUILD_BROWSER_IMAGE=1`: build, enable for one agent, browse |
 | 7 | Linux CUA (experimental) inside a container: X11, D-Bus, Chromium sandboxing with all caps dropped | Phase 8 doctor lint in the container log; acceptance test 15 |
 | 8 | Re-locking policy hashes when the old lock no longer matches | Rerun `70-configure.sh` after any config change; if it can't re-lock, clear `plugins.entries.policy.config.expectedAttestationHash` first |

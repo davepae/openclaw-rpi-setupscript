@@ -87,7 +87,7 @@ flowchart LR
 | Agent | Job | Sandbox | Notable tools |
 |---|---|---|---|
 | `main` | Your working agent: plans, codes, converts Office/PDF files, delegates | Rootless Docker, `network: none`, workspace read-write | `pdf`, `web_search`, `web_fetch` (these run in the Gateway, not the sandbox); can spawn `builder`, `reader` and `lab` |
-| `builder` | Installs dependencies, clones repos, calls APIs | Rootless Docker on a bridge network behind the egress firewall | Same as `main`, minus spawning and elevated |
+| `builder` | Installs dependencies, clones repos, calls APIs | Rootless Docker on a bridge network behind the egress firewall | Shell and file tools with network access (`curl`, `git`, package managers). The sandbox's default tool list, so no `web_search`, `web_fetch` or `pdf`; can't spawn other agents (`subagents.allowAgents: []`); elevated off |
 | `reader` | Reads untrusted pages, mail and documents, and returns summaries | No workspace, `minimal` tool profile | `web_search`, `web_fetch`, `pdf` only: no exec, no files, no scheduling |
 | `lab` | Compose stacks, long builds, desktop and computer use | Exec routed to the paired `lab-exec` node | Node exec under that node's approvals; `computer` once the desktop node is paired |
 
@@ -153,17 +153,18 @@ cd ~/openclaw-pi-setup
 cp config/settings.env.example config/settings.env
 nano config/settings.env          # admin user, timezone, DNS, model provider (see Configuration reference)
 
-sudo ./install-pi.sh              # runs phases 00 to 99, skipping completed ones; stops when it needs you
+sudo ./install-pi.sh              # runs every Pi phase in order, skipping completed ones; stops when it needs you
 ```
 
-`install-pi.sh` pauses for three manual steps:
+`install-pi.sh` stops when it needs you:
 
-1. **After phase 10:** reboot if the kernel or packages changed, then rerun `sudo ./install-pi.sh`.
-2. **In phase 40:** merge `config/tailnet-policy.hujson` into your tailnet policy first, replacing `you@example.com`.
+1. **Phase 0 (`00-preflight`)** stops if a required check fails, for example a wrong OS, a throttled Pi or an empty setting. Fix it and rerun. If it warns that the memory controller is missing, add `cgroup_enable=memory cgroup_memory=1` to `/boot/firmware/cmdline.txt` and reboot before going on.
+2. **After phase 1 (`10-base`):** reboot if the kernel or packages changed, then rerun `sudo ./install-pi.sh`.
+3. **Phase 4 (`40-tailscale`):** merge `config/tailnet-policy.hujson` into your tailnet policy first, replacing `you@example.com`.
    The script joins the tailnet and prints the Pi's MagicDNS name and tailnet IP. Put them in
    `PI_TAILNET_NAME` and `PI_TAILNET_IP` in `config/settings.env`, **turn on HTTPS for your tailnet**
    (see [Troubleshooting](#troubleshooting)), then rerun.
-3. **In phase 50:** it asks once for your model provider's API key. The key is stored only in `~openclaw_user/.openclaw/.env`.
+4. **Phase 5 (`50-openclaw`)** asks once for your model provider's API key and stores it only in `~openclaw_user/.openclaw/.env`. The key can't be empty. For a local server that doesn't check keys, enter any placeholder.
 
 Then pair your browser:
 
@@ -174,7 +175,7 @@ oc devices list
 oc devices approve <id>
 ```
 
-`oc` is a small wrapper that phase 50 installs at `/usr/local/bin/oc`. It runs `openclaw` as
+`oc` is a small wrapper that phase 5 installs at `/usr/local/bin/oc`. It runs `openclaw` as
 `openclaw_user` with the right systemd and rootless-Docker environment. Finish with
 `sudo pi/99-verify.sh` and the [manual acceptance tests](#verifying-the-install).
 
@@ -182,7 +183,7 @@ Run a phase again with `sudo ./install-pi.sh --from 60`, or call any phase scrip
 
 ## Phases in detail
 
-Run every script with `sudo` from the repository folder, as your admin user. Each one is idempotent.
+Run every script with `sudo` from the repository folder, as your admin user. Each one is safe to rerun; phase 5 asks before running onboarding again.
 
 | Phase | Script | What it does |
 |---|---|---|
@@ -356,14 +357,30 @@ sudo ls -la /home/openclaw_user/backups /var/backups/openclaw-export
 
 ### Restore
 
-Decrypt and unpack on any machine with the private key to inspect or recover files:
+**To look at or recover individual files**, decrypt and unpack on any machine that has the private key:
 
 ```bash
 mkdir -p /tmp/oc-restore
 age -d -i ~/.config/age/openclaw-backup.key <file>.tar.gz.age | tar -xzf - -C /tmp/oc-restore
 ```
 
-Files sit under `…/payload/posix/<original absolute path>`, and `manifest.json` describes the archive. To restore a whole Pi, rebuild it with these scripts, stop the Gateway (`oc gateway stop`), copy `~/.openclaw` and the workspaces back into place as `openclaw_user`, keeping modes `700`/`600`, then start the Gateway and run `sudo pi/99-verify.sh`. This full-restore path hasn't been tested yet; the decrypt-and-list check above has.
+Files sit under `…/payload/posix/<original absolute path>`, and `manifest.json` describes the archive.
+
+**To restore a whole Pi**, use OpenClaw's own restore. It verifies the archive and its databases, and it never writes over live state:
+
+```bash
+# On the rebuilt Pi, after copying the decrypted .tar.gz there
+sudo install -o openclaw_user -g openclaw_user -m 600 <file>.tar.gz /home/openclaw_user/restore.tar.gz
+oc backup restore /home/openclaw_user/restore.tar.gz --target /home/openclaw_user/restore   # target must not exist or must be empty
+```
+
+Activating the restore is a separate step while the Gateway is stopped (`oc gateway stop`):
+1. Move the restored state into place, using `manifest.json` as the map of what goes where.
+2. Run `oc doctor`.
+3. Reinstall plugins, because plugin `node_modules` aren't archived. For example, run `oc plugins install @openclaw/searxng-plugin --force`.
+4. Start the Gateway and run `sudo pi/99-verify.sh`.
+
+Approvals and other state roll back to the backup's time, so review pending approvals before you resume. See OpenClaw's [backup docs](https://docs.openclaw.ai/cli/backup). This full-restore path hasn't been tested on this build yet; the decrypt-and-list check above has.
 
 ## Optional: elevated mode
 
@@ -424,13 +441,13 @@ These problems all came up during the first real install and are handled in the 
 | `docker info` warns "No memory limit support" | The memory cgroup is off. Add `cgroup_enable=memory cgroup_memory=1` to `/boot/firmware/cmdline.txt` and reboot |
 | `Serve is not enabled on this tailnet` | HTTPS certificates must be on for the tailnet. Run `sudo tailscale serve --bg 18789` and open the link it prints, or turn on HTTPS on the admin console's DNS page, then run `sudo tailscale serve reset` so OpenClaw can own the route. The machine name then appears in public certificate-transparency logs |
 | `tailscale serve status` says "No serve config" | Normal while the Gateway is stopped. Managed Serve forwards to its own loopback listener (for example `127.0.0.1:33003`), not 18789 |
-| `openclaw: command not found` | Use `oc …`, or `sudo -iu openclaw_user` (phase 50 adds `~/.openclaw/bin` to its `PATH`) |
-| The service installer refuses with "unsafe permissions" | Debian's umask 002 makes unit folders group-writable. Phase 50 tightens `~/.config/systemd/user` to 700 |
-| "Managed service artifacts changed during publication" | A drop-in appeared mid-install. Phase 50 moves it aside and rewrites it after onboarding |
+| `openclaw: command not found` | Use `oc …`, or `sudo -iu openclaw_user` (phase 5 adds `~/.openclaw/bin` to its `PATH`) |
+| The service installer refuses with "unsafe permissions" | Debian's umask 002 makes unit folders group-writable. Phase 5 tightens `~/.config/systemd/user` to 700 |
+| "Managed service artifacts changed during publication" | A drop-in appeared mid-install. Phase 5 moves it aside and rewrites it after onboarding |
 | Rerunning onboarding stores the key as "inactive" | Reruns use `--auth-choice skip` and keep the saved credential |
 | `reader` says it has no web access when `main` spawns it | A child can't exceed its requester's tools. `main` needs `web_search` and `web_fetch` (already in the patch) |
 | Daily policy watch reports drift | You changed config by hand. Rerun `sudo pi/70-configure.sh` to re-lock |
-| The Gateway takes over a minute on first start | Normal on a Pi (compile cache, state database). Phase 50 waits up to 120 seconds |
+| The Gateway takes over a minute on first start | Normal on a Pi (compile cache, state database). Phase 5 waits up to 120 seconds |
 
 ## What's been tested
 
@@ -438,9 +455,9 @@ These problems all came up during the first real install and are handled in the 
 |---|---|
 | Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI |
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
-| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed |
+| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
-| Acceptance tests 1, 2, 3, 9, 11 | Passed |
+| Acceptance tests 1, 2, 3, 11 | Passed (test 9 not yet run) |
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
 | Lab VM (phase 8), desktop/computer-use node, sandbox browser image | **Not run yet** |

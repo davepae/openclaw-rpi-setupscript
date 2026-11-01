@@ -11,7 +11,7 @@ Run the Gateway on the Pi as an unprivileged user that never executes agent code
 - **Eight flags settled.** The rootless Docker backend, workspace ownership, the lab node key, cross-agent spawning, the memory cgroup, container egress filtering, Serve as a non-root user and the elevated scoping key are now settled by a test or by the source. See Flagged.
 - **Five config errors fixed.** v2's config left `reader` without its web tools and `pdf` unavailable, kept a sandbox user that can't write the workspace under rootless Docker, gave `computer` to `main`, and lacked `agents.ownership: "explicit"`, so it failed `openclaw config validate` on its own. The configuration section now matches what was validated and runs on the Pi.
 - **Elevation now has a known key, and a cost.** Control UI chat is the `webchat` provider and carries no sender id, so the only scope is `webchat: ["*"]`. The security audit rates that critical. It stays off until you opt in.
-- **New risks from the real build.** The local model is 2-bit quantized and registered as text-only, although it supports vision. The allowlisted LAN hosts are open on every port to `builder`. IPv6 global addresses are outside the Pi's egress rules. All three are in Flagged with a way to settle them.
+- **New risks from the real build, now settled.** The local model is 2-bit quantized and was registered as text-only although it supports vision; vision, injection resistance and a coding task have since been verified. Allowlisted LAN hosts were open on every port to `builder`; entries are now `ip:port`. Global IPv6 sat outside the Pi's egress rules; the Pi has none today. See flags 15–17.
 
 What changed from v1 of this review:
 
@@ -32,7 +32,7 @@ Seven statements in the original plan and four in v1 of this review were wrong o
 
 | Where | Claim | Correct position | Source |
 | --- | --- | --- | --- |
-| Plan | Node.js 22 LTS | Unsupported and refused at startup. Engine range is `>=24.16.0 <25 \|\| >=26.1.0`; use 24.22.1+ or 26.12.1+, which reject keys compromised in the October 2026 eMudhra incident. | [Node.js compatibility](https://docs.openclaw.ai/install/node-compatibility) |
+| Plan | Node.js 22 LTS | Unsupported and refused at startup. Engine range is `>=24.22.1 <25 \|\| >=26.12.1`; those floors reject keys compromised in the October 2026 eMudhra incident. | [Node.js compatibility](https://docs.openclaw.ai/install/node-compatibility) |
 | Plan | System service `openclaw.service` | `openclaw onboard --install-daemon` installs the user unit `openclaw-gateway.service`; a headless box needs `loginctl enable-linger`. | [Raspberry Pi install](https://docs.openclaw.ai/install/raspberry-pi) |
 | Plan | No sudo means no host takeover | Sandboxing is off by default, and unsandboxed host exec defaults to `security="full"`, `ask="off"`. Without a sandbox the agent can rewrite its own config and credentials as `openclaw_user`. | [Trust model](https://docs.openclaw.ai/gateway/security/trust-model), [Exec approvals](https://docs.openclaw.ai/tools/exec-approvals) |
 | Plan | Gateway user drives Docker | Membership in the `docker` group is root-equivalent; Docker's own docs say so. | [Docker rootless](https://docs.docker.com/engine/security/rootless/) |
@@ -48,7 +48,8 @@ Seven statements in the original plan and four in v1 of this review were wrong o
 
 | Claim in v2 | Correct position | Evidence |
 | --- | --- | --- |
-| `reader` gets `group:web` and `pdf` | The `coding` profile omits both, and so does the sandbox default tool list. Each needs `alsoAllow` in the tool layer **and** in `tools.sandbox.tools`, or the model never sees them | `src/agents/tool-catalog.ts`; `openclaw sandbox explain` |
+| `reader` gets `group:web` and `pdf` | `pdf` is in no profile, and the sandbox's default tool list omits web tools and `pdf`. Each needs `alsoAllow` in the tool layer **and** in `tools.sandbox.tools`. `reader` also moved to the `minimal` profile, because `coding` would hand it cron, skill_workshop and session tools | `src/agents/tool-catalog.ts`; `openclaw sandbox explain`; `/tools` in a `reader` chat |
+| `main` can stay without web tools and delegate to `reader` | A spawned child is capped at its requester's effective tool list, so a `reader` spawned by `main` had no web tools. `main` now has `web_search` and `web_fetch` in its sandbox layer. They run in the Gateway, so `main`'s own commands stay offline | 2026.10.8 source (`inheritedToolAllowlist` in `agent-tools`); fixed and re-tested on the Pi |
 | The sandbox's default user is fine | Under rootless Docker, OpenClaw's default `--user <workspace uid:gid>` maps to a subordinate ID that can't write the bind-mounted workspace. `docker.user: "0:0"` is container root, which is `openclaw_user` on the host with no capabilities | `src/agents/sandbox/docker-user.ts`; verify check "workspace writes land as openclaw\_user" |
 | The elevated key for the Control UI is unknown | Control UI chat is provider `webchat`, and Control UI and TUI clients carry no sender id, so only `"*"` can match. The audit reports `tools.elevated.allowFrom.webchat.wildcard` as critical | `src/utils/message-channel-constants.ts`, `src/gateway/server-methods/gateway-client-identity.ts` |
 | Serve is a config switch | It also needs HTTPS certificates turned on for the tailnet, which publishes the machine name in public certificate-transparency logs, plus `tailscale set --operator=openclaw_user`. Managed Serve forwards to a dedicated loopback listener (127.0.0.1:33003 here), not to 18789 | First install: "Serve is not enabled on this tailnet" until HTTPS was on |
@@ -56,6 +57,9 @@ Seven statements in the original plan and four in v1 of this review were wrong o
 | Disabling the rootful daemon is enough | `containerd.service` stays enabled after `docker.service` and `docker.socket` are off. Disable all three | First install |
 | The service installer just works | It refuses group-writable unit directories (Debian's umask 002) and aborts if a drop-in appears mid-install. Use umask 022, `chmod 700` on `~/.config/systemd/user`, and write the drop-in after onboarding | First install |
 | Acceptance test 4: card "in your DM" | There are no DMs: the card appears in the Control UI or a paired phone app | Design: no chat channels |
+| `backup create --keep-daily 7 --keep-weekly 4` prunes local backups | Retention flags require `--to <location>`; with only `--output` the command refuses and writes nothing. Local archives are pruned with `find` (14 days) | First nightly run failed; CLI error "retention flags require --to" |
+| `backup create --only-config` lands somewhere sensible | Without `--output` it writes to the current folder, the agent user's home. Phase 7 now writes to `~/backups/config` | `docs/cli/backup.md`; first install |
+| `plugins.allow` lists only the extra plugins | It is an exclusive list that applies to built-in plugins too; it must name everything the Gateway loads | `docs/tools/plugin.md`; restart kept 17 of 17 plugins |
 
 ## Execution tiers and escalation
 
@@ -116,7 +120,7 @@ Coding happens in a managed worktree projected into a rootless Docker sandbox on
 **On the lab node (tier 3).**
 
 - **Compose stacks.** Web app plus PostgreSQL plus Redis runs on the lab VM, whose `lab` user may control that VM's Docker. The VM is the boundary: it holds no secrets you care about, has no route to your LAN, and is rebuilt from a snapshot when in doubt.
-- **Whole sessions on the node.** A node started with `--session-host` can run entire agent sessions on the lab VM. Restrict where with `nodeHost.workerRuns.folders` (for example `["~/work"]`) on the node itself.
+- **Whole sessions on the node.** A node started with `--session-host` can run entire agent sessions on the lab VM. `nodeHost.workerRuns.folders` isn't in the 2026.10.8 schema, so the scripts isolate hosted sessions with `nodeHost.workerRuns.isolation: "container"` instead (`LAB_SESSION_HOST=1`, off by default).
 - **Previews.** OpenClaw Portals do not apply here: sandboxed sessions never receive the `portal` tool, because it opens a listener on the Gateway host. Instead, reach dev servers on the lab VM over Tailscale, with the tailnet policy letting only your devices reach that VM.
 
 To keep this machine-readable for the agent, commit `.openclaw/portals.json` in each repo naming the dev server command and port; the Gateway never runs these commands itself.
@@ -149,7 +153,7 @@ A single all-powerful agent is both less safe and less capable than a small rost
 | --- | --- | --- | --- | --- |
 | `reader` | Reads untrusted web, mail and docs; returns summaries | `all`, `workspaceAccess: "none"` | `minimal` profile plus `web_search`, `web_fetch` and `pdf` in both layers (the `coding` profile would add cron, skill\_workshop and session tools); runtime, fs, `browser`, `computer` and `sessions_spawn` denied; elevated off | A cheaper tier is acceptable only because it has no tools that act |
 | `main` | Your working agent in the Control UI: plans, codes, converts documents, delegates | `all`, rootless Docker, `network: "none"`, `user: "0:0"` | `pdf` in both layers; `web_search` and `web_fetch` in the sandbox layer, because a spawned child can't exceed its requester's tools; `sessions_spawn` limited to `builder`, `reader`, `lab` | The strongest tier you can afford. OpenClaw's prompt-injection guidance says model choice is a real defense for tool-using agents (flag 15) |
-| `builder` | Installs dependencies, clones, calls APIs | `all`, Docker `network: "bridge"` behind the egress rules | As `main`, but no spawning and elevated off | Same as `main` |
+| `builder` | Installs dependencies, clones, calls APIs | `all`, Docker `network: "bridge"` behind the egress rules | The sandbox's default tools only: shell and files, with network through the firewall. No `web_search`, `web_fetch` or `pdf`; can't spawn other agents; elevated off | Same as `main` |
 | `lab` | Compose stacks, long builds, desktop work | Exec pinned to the `lab-exec` node with `tools.exec.node` | Node exec under the node's approvals; `computer` in both layers once the desktop node is paired | Same as `main`; computer use also needs vision |
 
 Capabilities worth turning on:
@@ -163,7 +167,7 @@ Capabilities worth turning on:
 
 **Office and PDF files.**
 
-- **Reading PDFs.** The built-in `pdf` tool analyzes PDFs (defaults: 10 MB, 20 pages). Non-Anthropic/Google providers get extracted text plus page images, so set `agents.defaults.pdfModel` to a vision-capable model. It rejects remote URLs when sandboxed. In this build `pdfModel` is the same local model as `main`, and it supports images, but OpenClaw sends page images only once the model's `input` includes `"image"` (flag 15).
+- **Reading PDFs.** The built-in `pdf` tool analyzes PDFs (defaults: 10 MB, 20 pages). Non-Anthropic/Google providers get extracted text plus page images, so set `agents.defaults.pdfModel` to a vision-capable model. It rejects remote URLs when sandboxed. In this build `pdfModel` is the same local model as `main`. OpenClaw renders page images for pages with little text and sends them only if the model's `input` includes `"image"`; with that set, vision was verified on a scanned-style test page (flag 15).
 - **Everything else.** DOCX, XLSX, PPTX, legacy DOC/XLS/PPT, ODF and PDF editing run through `exec` in the sandbox image: `libreoffice-writer-nogui`, `-calc-nogui`, `-impress-nogui`, `python3-docx`, `python3-openpyxl`, `python3-pypdf`, `poppler-utils`, `pandoc`, and Carlito/Caladea fonts for Microsoft-compatible layout.
 - **LibreOffice under a read-only root.** Point its profile at tmpfs: `soffice --headless -env:UserInstallation=file:///tmp/lo-profile --convert-to pdf ...`, one conversion at a time.
 - **Documents are hostile input.** LibreOffice fixed at least nine importer memory-corruption bugs in 2026 (OOXML, PPT, Calc, EMF+, DXF); Debian 13's security build is `4:25.2.3-2+deb13u8`. Parse untrusted files only in `network: "none"` sandboxes — several of those bugs involve external data links — and rebuild the image weekly.
@@ -178,7 +182,7 @@ Three rules: only you can reach the Gateway, there is no chat channel to command
 - **Loopback plus Tailscale Serve.** `gateway.bind: "loopback"` with `gateway.tailscale.mode: "serve"`. Funnel stays off. Serve also needs HTTPS certificates turned on for the tailnet once, which puts the machine name in public certificate-transparency logs. It also needs `tailscale set --operator=openclaw_user` so the Gateway can manage Serve without root. Managed Serve forwards to its own loopback listener (127.0.0.1:33003 on this Pi), not to 18789.
 - **Tailnet identity counts as login.** With Serve, `gateway.auth.allowTailscale` defaults to true, so any tailnet identity that can reach the Pi gets Control UI access without a token. Restrict the Pi in your tailnet policy to your own identity, or set it to `false`. This build does both.
 - **A real token.** `openssl rand -hex 32`; `openclaw security audit` flags anything under 24 characters.
-- **Nodes authenticate differently.** Tailscale identity headers do not authenticate node connections. The lab nodes join with the Gateway token over the Serve HTTPS URL, then go through device pairing and a separate command-surface approval; approving `system.run` requires `operator.admin`.
+- **Nodes authenticate differently.** Tailscale identity headers do not authenticate node connections. Lab nodes enroll with a single-use join URL from `openclaw devices join-code`, redeemed by `openclaw connect` over the Serve HTTPS URL; there's no token flag for this. An admin-minted join code approves the device and its first command surface, including `system.run`, so each node's approvals document is written locally before it joins.
 
 **Who can command it.**
 
@@ -195,8 +199,8 @@ Three rules: only you can reach the Gateway, there is no chat channel to command
 
 - **Out of the agent's reach.** Provider keys and bot tokens live in `~/.openclaw/.env` or SecretRefs, never in the workspace. Workspace `.env` files cannot override provider credentials or any `OPENCLAW_*` variable.
 - **Permissions.** `~/.openclaw` at `700`, files at `600`; `openclaw security audit --fix` repairs drift.
-- **Transcripts keep secrets verbatim.** Don't paste credentials into chat; prune old sessions; add `logging.redactPatterns` for hostnames and tokens.
-- **Backups are sensitive.** `openclaw backup create` archives include credentials; store them encrypted, off the Pi.
+- **Transcripts keep secrets verbatim.** Don't paste credentials into chat, and prune old sessions. Be careful with `logging.redactPatterns`: a custom list *replaces* the default string list for logs and transcripts. So copy the defaults in if you add your own; the build leaves it at the defaults.
+- **Backups are sensitive.** `openclaw backup create` archives include `~/.openclaw/.env` (API key and gateway token). Phase 9b encrypts each one to an `age` public key for another machine to pull; see the README's Backups section.
 - **Supply chain.** `plugins.allow` lists exactly the plugins you run; `security.installPolicy` can block or warn on new skill and plugin installs.
 
 ## Complete configuration
@@ -339,7 +343,7 @@ openclaw sandbox recreate --all   # after sandbox changes
 
 ## Pi 5 platform settings
 
-The Pi hosts the Gateway, rootless Docker and the tier 1–2 sandboxes; heavy and desktop work goes to the lab VM. You've described this Pi as the 16 GB model on Debian 13 with an NVMe boot drive; the plan says 8 GB — the sandbox memory caps above assume 16 GB, so halve them on an 8 GB board.
+The Pi hosts the Gateway, rootless Docker and the tier 1–2 sandboxes; heavy and desktop work goes to the lab VM. The build Pi is a 16 GB Pi 5 on Debian 13 with an NVMe boot drive. The sandbox memory caps above assume 16 GB, so halve them on an 8 GB board.
 
 | Area | Setting | Source |
 | --- | --- | --- |
@@ -389,8 +393,8 @@ v2 had fourteen open points. The first install closed seven outright, settled th
 
 | # | Question | Status | What's known / how to settle it |
 | --- | --- | --- | --- |
-| 15 | Is the model strong enough to be the defense this design assumes? | **Closed for Pi work 2026-10-31** | `main`, `builder`, `lab` and `pdfModel` all run a local 125B mixture-of-experts model, quantized to about 2 bits (IQ2\_XS). It supports images, but onboarding registered it as text-only; fix that with `openclaw config set 'models.providers.<provider-id>.models[0].input' '["text","image"]' --strict-json`, and set `CUSTOM_IMAGE_INPUT="1"` in `settings.env` for future rebuilds. Vision verified on 2026-10-31: on a vision-test PDF's image-only page, it read every chart value, shape, color and the handwritten code word correctly. Test 11 passed, and a multistep coding task worked: hand-off to builder, branch, new test, a 298/298 suite whose raw output matched on re-run, no push. One caveat: its first report condensed pytest output, so ask for raw output when it matters. Size isn't the concern. What hasn't been measured is how much the 2-bit quantization costs in tool calling and instruction following. The design leans on a strong model to resist prompt injection, on vision for PDFs, and on vision for computer use (test 15 can't pass on a text-only model). Run test 11 and a real multistep coding task. If either is shaky, point at least `main` and `pdfModel` at a stronger or vision-capable model, and keep `reader` on the local one |
-| 16 | Allowlisted LAN hosts are open on every port | **Closed 2026-10-31** | `EGRESS_ALLOW_HOSTS` (192.168.50.10, 192.168.50.20) returns *all* traffic from `openclaw_user`, including `builder`, which faces the internet and can be steered by what it reads. Fixed: allow entries are now `ip:port` (LLM server 8080, SearXNG 8080, Firecrawl 3002). Tested: SearXNG and Firecrawl answer, camofox (6080) is refused. Still true: `builder` can call the Firecrawl API directly, which can fetch LAN URLs; a pfSense rule limiting the NUC's LAN reach closes that |
+| 15 | Is the model strong enough to be the defense this design assumes? | **Closed for Pi work 2026-10-31** | `main`, `builder`, `lab` and `pdfModel` all run a local 125B mixture-of-experts model, quantized to about 2 bits (IQ2\_XS). It supports images, but onboarding registered it as text-only; fix that with `openclaw config set 'models.providers.<provider-id>.models[0].input' '["text","image"]' --strict-json`, and set `CUSTOM_IMAGE_INPUT="1"` in `settings.env` for future rebuilds. Vision verified on 2026-10-31: on a vision-test PDF's image-only page, it read every chart value, shape, color and the handwritten code word correctly. Test 11 passed, and a multistep coding task worked: hand-off to builder, branch, new test, a 298/298 suite whose raw output matched on re-run, no push. One caveat: its first report condensed pytest output, so ask for raw output when it matters. The concern was the 2-bit quantization, not size, and these tests found no problem for Pi work. Computer use (test 15) still needs the lab. If the model ever gets shaky, point `main` and `pdfModel` at a stronger model first |
+| 16 | Allowlisted LAN hosts are open on every port | **Closed 2026-10-31** | Bare `EGRESS_ALLOW_HOSTS` entries (192.168.50.10, 192.168.50.20) opened *all* ports from `openclaw_user`, including `builder`, which faces the internet and can be steered by what it reads. Fixed: allow entries are now `ip:port` (LLM server 8080, SearXNG 8080, Firecrawl 3002). Tested: SearXNG and Firecrawl answer, camofox (6080) is refused. Still true: `builder` can call the Firecrawl API directly, which can fetch LAN URLs; a pfSense rule limiting the NUC's LAN reach closes that |
 | 17 | IPv6 global addresses | **Closed 2026-10-31 (recheck if IPv6 is enabled)** | The Pi's rules reject only ULA, link-local and multicast IPv6. If your LAN hands out global IPv6, the Gateway process, which runs `web_fetch` outside any sandbox, could reach LAN hosts over v6, leaving only the SSRF policy. Run `ip -6 addr show scope global` on the Pi. If there's a global address, block the LAN prefix in pfSense or disable IPv6 on the Pi's interface. Result on 2026-10-31: the only global-scope address is Tailscale's `fd7a:115c:a1e0::/48` ULA, which the rules already reject apart from MagicDNS. The LAN interface has no IPv6, so there is no gap today |
 | 13 | Scoping `/elevated` to your Control UI sessions | **Closed — decision is yours** | The key is `tools.elevated.allowFrom.webchat: ["*"]`; no narrower sender exists. The audit calls it critical. It's off by default (`ENABLE_ELEVATED=0`); until you turn it on, do tier 4 work yourself over SSH |
 | 3 | Pinning the `lab` agent to a node | Key closed; runtime open | `agents.entries.lab.tools.exec.node: "lab-exec"` validates. Behavior is untested until the lab is paired (test 6) |
@@ -435,7 +439,7 @@ OpenClaw docs (release v2026.10.8):
 - [Access control and allowlists](https://docs.openclaw.ai/gateway/security/access-control)
 - [Secrets, storage, and logs](https://docs.openclaw.ai/gateway/security/secrets-and-storage)
 - [Running the security audit](https://docs.openclaw.ai/gateway/security/running-the-audit)
-- [Network exposure](https://docs.openclaw.ai/gateway/security/network-exposure.md)
+- [Network exposure](https://docs.openclaw.ai/gateway/security/network-exposure)
 - [Computer use](https://docs.openclaw.ai/nodes/computer-use)
 - [Run a node host](https://docs.openclaw.ai/nodes/node-host)
 - [Configuration — browser, UI, and desktop](https://docs.openclaw.ai/gateway/config-browser-ui-desktop)
@@ -443,7 +447,7 @@ OpenClaw docs (release v2026.10.8):
 - [Managed worktrees](https://docs.openclaw.ai/concepts/managed-worktrees)
 - [Web fetch](https://docs.openclaw.ai/tools/web-fetch)
 - [PDF tool](https://docs.openclaw.ai/tools/pdf)
-- [Web / Tailscale access](https://docs.openclaw.ai/web/index.md)
+- [Web / Tailscale access](https://docs.openclaw.ai/web)
 - [Policy attestation and watch](https://docs.openclaw.ai/cli/policy/attestation)
 
 Docker, Debian, Raspberry Pi and advisories:
@@ -452,8 +456,8 @@ Docker, Debian, Raspberry Pi and advisories:
 - [Docker rootless tips](https://docs.docker.com/engine/security/rootless/tips/)
 - [Debian security tracker: libreoffice](https://security-tracker.debian.org/tracker/source-package/libreoffice)
 - [LibreOffice security advisories](https://www.libreoffice.org/security/)
-- [Debian: python3-docx](https://packages-picconi.debian.org/python3-docx)
-- [Debian: python3-openpyxl](https://packages.debian.org/openpyxl)
+- [Debian: python3-docx](https://packages.debian.org/trixie/python3-docx)
+- [Debian: python3-openpyxl](https://packages.debian.org/trixie/python3-openpyxl)
 - [Raspberry Pi config.txt: 16K-page kernel](https://github.com/raspberrypi/documentation/pull/4195/files)
 - [rpi-swap](https://github.com/raspberrypi/rpi-swap)
 - [Pi 5 memory cgroup fix (community)](https://industrialmonitordirect.com/blogs/knowledgebase/docker-cgroup-memory-limit-error-on-raspberry-pi-5-fix)
