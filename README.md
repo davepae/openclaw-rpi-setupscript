@@ -312,7 +312,7 @@ With the lab VM, in a `lab` session:
 |---|---|---|
 | 6 | `python3 -c 'print(1)'` | Refused outright with `SYSTEM_RUN_DENIED`, no card |
 | 10 | Have the desktop node run a shell command | Denied by its approvals document |
-| 13 | `/exec security=full ask=off <three-command task>`, then one more command | The task runs without cards; the next command prompts |
+| 13 | `/exec security=full ask=off <three-command task>`, then one more command | Cards still appear for anything off the allowlist: the Pi's lab entry and the node's approvals document (`ask: on-miss`) are stricter than the override, and the stricter policy wins |
 | 15 | Screenshot, then type into a text editor on the desktop node | Computer tool works; no shell |
 | – | `/usr/bin/ls -la /home/oclab`, then `uname -a` | The first runs with no card; the second gets a card |
 
@@ -494,7 +494,7 @@ These came up with the lab exec node:
 |---|---|
 | Every lab command shows a card, even `git` or `ls`, with Allow Always unavailable | The Pi's `ask: always` applies to the lab agent, or the allowlist or the command uses a bare name. Check `oc approvals get --gateway` shows `agents.lab` with `ask=on-miss`, and use full paths |
 | Cards show `/bin/sh -lc "…"` | That's the node's own shell transport. The model sends the plain command |
-| `exec denied: request-failed` | Always seen when two commands ran at once. Also seen intermittently after a single approval (twice after Allow, once on a denied card), without a logged cause and unreproducible since. Ask for one command at a time; if it recurs, note the time and run `oc approvals pending` straight away |
+| `exec denied: request-failed` | Seen on the lab node when two commands ran at once and when a card expired after 30 minutes (test 12). A card you deny shows `user-denied` instead. It was also seen twice right after clicking Allow, without a logged cause and unreproducible since. Ask for one command at a time; if it follows an Allow, note the time and run `oc approvals pending` straight away |
 | `SYSTEM_RUN_DENIED: approval cannot safely bind …` | A chain or inline interpreter code sent to the node. One plain command per request; use a script file for multi-step work |
 | `spawn … EACCES` running `openclaw` as the lab user | `sudo -u` kept a folder the lab user can't enter. Add `cd ~` first |
 
@@ -506,7 +506,7 @@ These came up with the lab exec node:
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
-| Acceptance tests 1, 2, 3, 6, 11 | Passed (test 6: inline code refused on the lab node). Test 9 not yet run |
+| Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
 | Lab VM host setup and exec node (phase 8) | Run on a Debian 13 VM on Proxmox VE, 2026-11-01. Allowlisted full-path commands ran with no card; a non-allowlisted command got a card; rootless Docker works for the lab user. The `80-nodes.sh finish` copy of `lab-AGENTS.md` and the scripted allowlist were applied by hand, not by a fresh run |
