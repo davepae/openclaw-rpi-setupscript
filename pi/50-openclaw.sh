@@ -5,7 +5,7 @@
 source "$(dirname "$0")/../lib/common.sh"
 require_root
 uid="$(user_uid "$OC_USER")"; home="$(user_home "$OC_USER")"
-oc="$home/.openclaw/bin/openclaw"
+# (OpenClaw lands in $home/.openclaw/bin/openclaw)
 
 log "Installing OpenClaw $OPENCLAW_VERSION with Node $NODE_VERSION into $home/.openclaw (no sudo)"
 as_user "$OC_USER" "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh \
