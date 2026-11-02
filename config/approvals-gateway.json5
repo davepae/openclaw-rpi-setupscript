@@ -1,4 +1,18 @@
 // Host approvals document for the Pi (the Gateway host). Applied with:
 //   openclaw approvals set --gateway --stdin < approvals-gateway.json5
 // Every host command prompts; allow-always cannot suppress it; no answer = deny.
-{ version: 1, defaults: { security: "allowlist", ask: "always", askFallback: "deny", autoAllowSkills: false } }
+//
+// agents.lab: the Gateway merges THIS file into node exec too (2026.10.9 source,
+// resolveExecHostApprovalContext: hostAsk = max(config ask, this file's agent ask)), so the
+// defaults' ask:"always" would make every lab-node command prompt, allowlisted or not, with
+// Allow Always unavailable. The lab agent therefore takes ask:"on-miss" here; the allowlist
+// itself is read from the lab node's own approvals file (config/approvals-lab-exec.json5).
+// The lab agent is pinned to host=node; on the Pi its allowlist is empty, so it would still
+// prompt for every command here.
+{
+  version: 1,
+  defaults: { security: "allowlist", ask: "always", askFallback: "deny", autoAllowSkills: false },
+  agents: {
+    lab: { security: "allowlist", ask: "on-miss", askFallback: "deny" },
+  },
+}
