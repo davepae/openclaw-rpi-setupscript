@@ -22,7 +22,7 @@ t "$OC_USER has no sudo rights"                 "! sudo -l -U $OC_USER | grep -q
 t "rootless daemon for $OC_USER"                "as_user $OC_USER 'docker info --format {{.SecurityOptions}}' | grep -q rootless"
 t "cgroup driver systemd (limits work)"         "as_user $OC_USER 'docker info --format {{.CgroupDriver}}' | grep -q systemd"
 t "memory limits supported"                     "! as_user $OC_USER 'docker info 2>&1' | grep -qi 'No memory limit support'"
-t "~/.openclaw is 700"                          "[[ \$(stat -c %a $(user_home "$OC_USER")/.openclaw) == 700 ]]"
+t ".openclaw dir is 700"                         "[[ \$(stat -c %a $(user_home "$OC_USER")/.openclaw) == 700 ]]"
 t ".env is 600"                                 "[[ \$(stat -c %a $(user_home "$OC_USER")/.openclaw/.env) == 600 ]]"
 
 log "Gateway exposure"

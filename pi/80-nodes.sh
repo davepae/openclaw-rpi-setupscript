@@ -39,6 +39,15 @@ case "$cmd" in
       log "$LAB_EXEC_NODE_NAME: approvals from the Pi (allowlist + ask on-miss + deny)"
       oc "approvals set --node '$LAB_EXEC_NODE_NAME' --file '$stage/approvals-lab-exec.json5'"
       oc "approvals get --node '$LAB_EXEC_NODE_NAME'"
+      # Lab rules (full paths, one command at a time). Never overwrite your own edits.
+      labws="$(user_home "$OC_USER")/lab"
+      install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$labws"
+      if [[ ! -e "$labws/AGENTS.md" ]]; then
+        install -m 644 -o "$OC_USER" -g "$OC_USER" "$BUNDLE_DIR/config/lab-AGENTS.md" "$labws/AGENTS.md"
+        ok "lab rules written to $labws/AGENTS.md"
+      elif ! cmp -s "$BUNDLE_DIR/config/lab-AGENTS.md" "$labws/AGENTS.md"; then
+        warn "$labws/AGENTS.md differs from config/lab-AGENTS.md; left as is"
+      fi
     else warn "$LAB_EXEC_NODE_NAME not connected yet"; fi
 
     if has "$LAB_DESKTOP_NODE_NAME"; then
