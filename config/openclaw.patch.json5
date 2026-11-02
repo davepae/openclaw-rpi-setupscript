@@ -74,7 +74,9 @@
       },
       lab: {
         workspace: "@@OC_HOME@@/lab",
-        tools: { exec: { host: "node", node: "@@LAB_EXEC_NODE_NAME@@", mode: "auto" } },
+        // mode "ask": allowlisted full-path binaries run silently; every other command gets a card.
+        // ("auto" would let the built-in reviewer approve low/medium-risk one-offs without asking.)
+        tools: { exec: { host: "node", node: "@@LAB_EXEC_NODE_NAME@@", mode: "ask" } },
       },
     },
   },

@@ -1,16 +1,27 @@
 // Host approvals document for the lab exec node. Applied LOCALLY on the lab VM before pairing
 // (local exec approvals default to security "full" / ask "off" until set), and re-applied from
-// the Pi with:  openclaw approvals set --node lab-exec --stdin < approvals-lab-exec.json5
+// the Pi with:  openclaw approvals set --node lab-exec --file approvals-lab-exec.json5
 // Allowlisted binaries run silently for the lab agent; anything else asks; no answer = deny.
 // strictInlineEval (in openclaw.json) still forces approval for python -c, node -e, sed, awk, find -exec.
+//
+// FULL PATHS, and the agent must call them by full path (see config/lab-AGENTS.md).
+// Verified in OpenClaw 2026.10.9 source (analyzeNodeApprovalRequirement / matchAllowlist): before
+// dispatching to a node, the Gateway re-checks this allowlist ON THE PI, resolving the executable
+// with an empty PATH. A bare name ("ls") never resolves there, so bare patterns never match and
+// every command prompts. A full path resolves only if that file also exists on the Pi, and then
+// matches a full-path pattern (bare patterns deliberately skip commands given with a path).
+// So every binary listed here must exist at the same path on BOTH the lab VM and the Pi.
+// Checked 2026-11-01: git, docker, ls, cat are /usr/bin on both. make and rg are /usr/bin on the
+// Pi; install them on the VM (apt install make ripgrep) for these entries to be useful.
+// npm/pnpm are on neither machine's PATH, so they are left out (they would always prompt).
 {
   version: 1,
   defaults: { security: "allowlist", ask: "on-miss", askFallback: "deny", autoAllowSkills: false },
   agents: {
     lab: {
       allowlist: [
-        { pattern: "git" }, { pattern: "docker" }, { pattern: "make" },
-        { pattern: "ls" }, { pattern: "cat" }, { pattern: "rg" }, { pattern: "pnpm" }, { pattern: "npm" },
+        { pattern: "/usr/bin/git" }, { pattern: "/usr/bin/docker" }, { pattern: "/usr/bin/ls" },
+        { pattern: "/usr/bin/cat" }, { pattern: "/usr/bin/make" }, { pattern: "/usr/bin/rg" },
       ],
     },
   },

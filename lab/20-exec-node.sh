@@ -22,6 +22,10 @@ install -m 600 -o "$LAB_USER" -g "$LAB_USER" "$BUNDLE_DIR/config/approvals-lab-e
 as_user "$LAB_USER" "openclaw approvals set --file \$HOME/.cache-approvals.json5 && openclaw approvals get"
 rm -f "$home/.cache-approvals.json5"
 
+# Headless nodes self-update by default (docs/nodes/node-host.md); keep the lab on the pinned
+# version and update it by hand alongside the Pi.
+as_user "$LAB_USER" "openclaw config set nodeHost.autoUpdate.enabled false"
+
 log "Redeeming the join URL and installing the node service"
 extra=""
 if [[ "${LAB_SESSION_HOST:-0}" == "1" ]]; then

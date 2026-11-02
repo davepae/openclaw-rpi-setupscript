@@ -6,6 +6,12 @@
 // What limits it here: no chat channels exist, so "webchat" = authenticated, paired Control UI/TUI
 // operators only; builder and reader have elevated disabled per agent; the Pi's host approvals
 // document is ask:"always", askFallback:"deny", so every elevated command still needs your tap.
+//
+// elevatedDefault "off": once elevated is allowed, a session with no /elevated directive defaults
+// to "on" (docs/gateway/config-agents/models.md; 2026.10.9 get-reply: `?? "on"`), which would
+// move main's exec out of its sandbox onto the Pi host in every chat. "off" keeps it opt-in:
+// send /elevated on in the one session that needs it, /elevated off when done.
 {
+  agents: { defaults: { elevatedDefault: "off" } },
   tools: { elevated: { allowFrom: { webchat: ["*"] } } },
 }
