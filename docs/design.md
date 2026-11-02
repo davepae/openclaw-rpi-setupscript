@@ -96,14 +96,14 @@ Prompt wording can't grant permission — policy is enforced by the Gateway and 
 
 | Lever | How | Effect | Limits |
 | --- | --- | --- | --- |
-| Allowlist | Routine binaries in the lab node's approvals document with `ask: "on-miss"`; or choose **Always allow here** on a card | Known commands run silently; only new ones prompt | "Always allow here" binds the exact command and folder; inline-eval forms are never persisted |
+| Allowlist | Routine binaries, as full paths present on both the node and the Gateway host, in the lab node's approvals document with `ask: "on-miss"`; or choose **Always allow here** on a card | Known commands run silently; only new ones prompt | "Always allow here" binds the exact command and folder; inline-eval forms are never persisted |
 | Auto-review | `tools.exec.mode: "auto"` on the `lab` agent | Allowlist matches run directly; a reviewer model allows a low- or medium-risk miss once, denies with a reason the agent sees, or asks you | Shell wrappers like `bash -lc` and commands whose executables can't all be bound skip review and ask you |
 | One-message override | Send `/exec security=full ask=off <entire task>` as a single message | That message runs without ordinary prompts; the next message reverts | The task must be in the same message; the host approvals document still wins if stricter — works on the lab node, still prompts on the Pi |
 | Full-permission session | **Execution permissions → full** in the Control UI | No prompts for the whole session, including past host approval floors | Requires `operator.admin`; anything the agent reads can steer commands unchecked. Lab sessions only, watched, then switch back |
 
 **Scheduled jobs** are the exception: choosing **Always allow** on an automation's card mints a standing grant bound to that job, command, folder and environment, expiring per `tools.exec.grantExpiryDays` (30 days here).
 
-**Recommended pattern.** Keep the Pi at `ask: "always"`. Run multistep host work as a `lab` session with an allowlist and `mode: "auto"`. Use the one-message override for known-safe bursts. Keep full sessions for rare runs you're watching.
+**Recommended pattern.** Keep the Pi at `ask: "always"`. Run multistep host work as a `lab` session with a full-path allowlist and `mode: "ask"`: allowlisted commands run, everything else gets a card. (`mode: "auto"` would let the reviewer approve low-risk one-offs instead.) Use the one-message override for known-safe bursts. Keep full sessions for rare runs you're watching.
 
 ## Development sandbox
 
@@ -280,7 +280,7 @@ Two documents carry the policy: `openclaw.json` decides which tools exist and wh
       },
       lab: {
         workspace: "/home/openclaw_user/lab",
-        tools: { exec: { host: "node", node: "lab-exec", mode: "auto" } },
+        tools: { exec: { host: "node", node: "lab-exec", mode: "ask" } },
         // after the desktop node pairs (computer.patch.json5):
         // tools.alsoAllow: ["computer"], tools.sandbox.tools.alsoAllow: ["computer"]
       },
@@ -308,16 +308,21 @@ Two documents carry the policy: `openclaw.json` decides which tools exist and wh
 **Host approvals documents.** Approvals can only tighten config, never loosen it. Apply these with `openclaw approvals set`:
 
 ```bash
-# Pi (Gateway host): every host command prompts, nothing auto-runs
+# Pi (Gateway host): every host command prompts, nothing auto-runs.
+# The Gateway also applies this document to node commands (the stricter ask wins), so the lab
+# agent gets ask:"on-miss" here; its allowlist comes from the node's own document.
 openclaw approvals set --gateway --stdin <<'EOF'
-{ version: 1, defaults: { security: "allowlist", ask: "always", askFallback: "deny", autoAllowSkills: false } }
+{ version: 1, defaults: { security: "allowlist", ask: "always", askFallback: "deny", autoAllowSkills: false },
+  agents: { lab: { security: "allowlist", ask: "on-miss", askFallback: "deny" } } }
 EOF
 
-# Lab exec node: allowlisted tools run, anything else asks you
+# Lab exec node: allowlisted tools run, anything else asks you. Full paths only: the Gateway
+# re-checks this allowlist on its own host with an empty PATH, so bare names never match and a
+# path must exist on both machines. The agent must call programs by these paths.
 openclaw approvals set --node lab-exec --stdin <<'EOF'
 { version: 1, defaults: { security: "allowlist", ask: "on-miss", askFallback: "deny", autoAllowSkills: false },
-  agents: { lab: { allowlist: [ { pattern: "git" }, { pattern: "docker" }, { pattern: "make" }, { pattern: "ls" }, { pattern: "cat" },
-                     { pattern: "rg" }, { pattern: "pnpm" }, { pattern: "npm" } ] } } }
+  agents: { lab: { allowlist: [ { pattern: "/usr/bin/git" }, { pattern: "/usr/bin/docker" }, { pattern: "/usr/bin/ls" },
+                     { pattern: "/usr/bin/cat" }, { pattern: "/usr/bin/make" }, { pattern: "/usr/bin/rg" } ] } } }
 EOF
 
 # Desktop node: computer use only, no shell
@@ -376,7 +381,7 @@ The step-by-step build now lives in the scripted [OpenClaw Pi 5 — End-to-End S
 | 3 | Ask `main` to spawn `builder`; `curl` pfSense, then a public site | LAN blocked, internet works | **Passed** |
 | 4 | `/elevated on`, then ask for `ls ~/.openclaw` | Refused by default; with the `webchat` opt-in, a Control UI card, and nothing runs until you approve | Ready |
 | 5 | Approve once, then ask for the same command again | A second card (`ask: "always"`) | Needs the opt-in |
-| 6 | Ask for `python3 -c 'print(1)'` on the lab node | Approval card (strict inline eval) | Needs the lab |
+| 6 | Ask for `python3 -c 'print(1)'` on the lab node | Refused outright with `SYSTEM_RUN_DENIED`, no card (node approvals can't bind inline interpreter code) | **Passed** 2026-11-01 |
 | 7 | CLI: `openclaw channels list --json` | `{"chat":{}}` | Covered by verify |
 | 8 | Open the Control UI from a tailnet device that isn't yours | Unreachable (tailnet policy) | Needs a second identity |
 | 9 | Ask `main` to change `openclaw.json` or install a plugin | Tool not available | Ready |
@@ -397,7 +402,7 @@ v2 had fourteen open points. The first install closed seven outright, settled th
 | 16 | Allowlisted LAN hosts are open on every port | **Closed 2026-10-31** | Bare `EGRESS_ALLOW_HOSTS` entries (192.168.50.10, 192.168.50.20) opened *all* ports from `openclaw_user`, including `builder`, which faces the internet and can be steered by what it reads. Fixed: allow entries are now `ip:port` (LLM server 8080, SearXNG 8080, Firecrawl 3002). Tested: SearXNG and Firecrawl answer, camofox (6080) is refused. Still true: `builder` can call the Firecrawl API directly, which can fetch LAN URLs; a pfSense rule limiting the NUC's LAN reach closes that |
 | 17 | IPv6 global addresses | **Closed 2026-10-31 (recheck if IPv6 is enabled)** | The Pi's rules reject only ULA, link-local and multicast IPv6. If your LAN hands out global IPv6, the Gateway process, which runs `web_fetch` outside any sandbox, could reach LAN hosts over v6, leaving only the SSRF policy. Run `ip -6 addr show scope global` on the Pi. If there's a global address, block the LAN prefix in pfSense or disable IPv6 on the Pi's interface. Result on 2026-10-31: the only global-scope address is Tailscale's `fd7a:115c:a1e0::/48` ULA, which the rules already reject apart from MagicDNS. The LAN interface has no IPv6, so there is no gap today |
 | 13 | Scoping `/elevated` to your Control UI sessions | **Closed — decision is yours** | The key is `tools.elevated.allowFrom.webchat: ["*"]`; no narrower sender exists. The audit calls it critical. It's off by default (`ENABLE_ELEVATED=0`); until you turn it on, do tier 4 work yourself over SSH |
-| 3 | Pinning the `lab` agent to a node | Key closed; runtime open | `agents.entries.lab.tools.exec.node: "lab-exec"` validates. Behavior is untested until the lab is paired (test 6) |
+| 3 | Pinning the `lab` agent to a node | **Closed 2026-11-01** | `agents.entries.lab.tools.exec.node: "lab-exec"` routes the lab agent's exec to the node; commands ran on the Debian VM as `oclab`. Two findings: the Gateway applies its own host approvals document to node commands (so the lab agent needs its own `ask: "on-miss"` entry on the Pi), and it re-checks the node allowlist on the Pi with an empty `PATH` (so entries and commands must be full paths present on both machines) |
 | 10 | `python3-pptx` in Debian 13 | Partly closed | The image builds with either apt or the PyPI-venv fallback. To see which: `docker run --rm openclaw-sandbox-dev:trixie-slim sh -c 'python3 -c "import pptx" \|\| /opt/office/bin/python -c "import pptx"'` |
 | 11 | Image size and LibreOffice memory | Partly closed | Dev image is 3.28 GB. Memory under the 3 GB cap is still untested: run test 14 with your largest real file |
 | 12 | Which Pi and which lab host | Partly closed | The Pi is built. No lab host is chosen yet; it should not be the NUC that serves SearXNG and Firecrawl |

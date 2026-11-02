@@ -5,8 +5,8 @@ Scripts and config that turn a Raspberry Pi 5 into a dedicated, locked-down
 rootless Docker sandboxes, can't reach your LAN, are reachable only from your
 Tailscale tailnet, and need your approval for every command that runs on the Pi itself.
 
-* **Pinned to:** OpenClaw **2026.10.8** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
-* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed. The lab-VM phase (exec node and desktop/computer-use node) is written and lint-clean but **hasn't been run yet**. See [What's been tested](#whats-been-tested).
+* **Pinned to:** OpenClaw **2026.10.9** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
+* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed (again on 2026.10.9 on 2026-11-01). The lab VM and its exec node were set up on Proxmox and tested on 2026-11-01. The desktop/computer-use node **hasn't been run yet**. See [What's been tested](#whats-been-tested).
 
 > [!WARNING]
 > This isn't an official OpenClaw project. It reflects one person's threat model for a home lab.
@@ -113,7 +113,7 @@ flowchart LR
 | Gateway exposure | Bound to loopback; reached only through Tailscale Serve (Funnel off) with token auth, and Tailscale identity isn't accepted as a login | `config/openclaw.patch.json5`, `pi/40-tailscale.sh` |
 | Tailnet policy | Only you can reach the Pi (443, 22); the lab can reach only the Pi's 443 | `config/tailnet-policy.hujson` |
 | Tool policy | `gateway`, `plugins`, `openclaw`, `portal` and `message` are denied to agents, so they can't reconfigure themselves; `reader` is on the `minimal` profile | `config/openclaw.patch.json5` |
-| Host approvals | `allowlist`, `ask: always`, `askFallback: deny` on the Pi; strict inline-eval approval for `python -c`, `node -e` and similar | `config/approvals-gateway.json5` |
+| Host approvals | `allowlist`, `ask: always`, `askFallback: deny` on the Pi; the `lab` agent gets `ask: on-miss` so its node allowlist works. Strict inline-eval approval for `python -c`, `node -e` and similar | `config/approvals-gateway.json5` |
 | Drift detection | Policy plugin with a hash-locked attestation, plus a daily `policy watch` timer | `config/policy.jsonc`, `pi/70-configure.sh`, `pi/90-timers.sh` |
 | Secrets | Provider key and gateway token live only in `~openclaw_user/.openclaw/.env` (mode 600); `openclaw.json` holds env references | `pi/50-openclaw.sh` |
 
@@ -200,9 +200,9 @@ Run every script with `sudo` from the repository folder, as your admin user. Eac
 | 9b | `pi/95-backup-export.sh` | Optional: nightly encryption of each backup to your `age` public key, for another machine to pull. See [Backups](#backups). Skipped when `BACKUP_AGE_RECIPIENT` is empty |
 | 10 | `pi/99-verify.sh` | 34 automated checks, then prints the manual acceptance tests |
 
-### Lab VM (optional, untested)
+### Lab VM (optional)
 
-On a separate x86 host, run a disposable VM on its own VLAN. Copy this repository and your
+On a separate x86 host, run a disposable VM, ideally on its own VLAN. This build uses a Debian 13 VM on Proxmox VE on the main LAN; the runbook's phase 8 covers that case. Copy this repository and your
 `settings.env` to it, then:
 
 ```bash
@@ -217,8 +217,19 @@ sudo pi/80-nodes.sh status          # Pi: then `approve <id>` if a computer.act 
 sudo pi/80-nodes.sh finish          # Pi: re-applies node approvals, pins the lab agent, allows `computer`
 ```
 
-The exec node runs an allowlist (`git docker make ls cat rg pnpm npm`), asks before running anything
-else, and denies when nobody answers. The desktop node denies all shell commands; only the
+The exec node runs a full-path allowlist (`/usr/bin/git`, `docker`, `ls`, `cat`, `make`, `rg`),
+asks before running anything else (lab exec mode `ask`), and denies when nobody answers. Three
+things matter, all verified in the 2026.10.9 source and on the lab VM:
+
+- The Pi's own approvals document applies to node commands too, which is why the `lab` agent has
+  its own `ask: on-miss` entry in `config/approvals-gateway.json5`.
+- The Gateway re-checks the node's allowlist on the Pi with an empty `PATH`. Patterns must be full
+  paths that exist on **both** machines, and the agent must call programs by full path.
+  `config/lab-AGENTS.md` tells it so; `finish` copies it into the lab workspace.
+- Send one command per request. Chains (`&&`, pipes) and inline code are refused on a node, and
+  two commands at once have failed with `request-failed`.
+
+The desktop node denies all shell commands; only the
 `computer` tool works there. Computer use needs a vision-capable model.
 
 ## Configuration reference
@@ -228,7 +239,7 @@ secret goes in this file.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.10.8` / `24.22.1` | Pinned versions. Bump them deliberately and retest |
+| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.10.9` / `24.22.1` | Pinned versions. Bump them deliberately and retest |
 | `ADMIN_USER` | `pi` | Your human admin account (has sudo) |
 | `OC_USER` | `openclaw_user` | The unprivileged agent account |
 | `TIMEZONE` | `America/Chicago` | Any name from `timedatectl list-timezones` |
@@ -398,6 +409,11 @@ carries no sender id, so `"*"` is the only value that works. With no chat channe
 **critical** by design. Elevated commands run as `openclaw_user` and can read its `.env`, so
 treat each card like a `sudo` prompt.
 
+Elevated stays off in each session until you send `/elevated on` there, because
+`config/elevated.patch.json5` also sets `agents.defaults.elevatedDefault: "off"`. Without that, OpenClaw's default is `"on"` once elevated
+is allowed, and `main`'s commands would leave the sandbox in every chat. Send `/elevated off` when
+you're done. The `lab` agent doesn't need elevated; its commands run on the node either way.
+
 To turn it off, setting the variable back to `0` isn't enough. Run `oc config unset tools.elevated.allowFrom`, then `sudo pi/70-configure.sh`.
 
 ## Optional: self-hosted search (SearXNG and Firecrawl)
@@ -449,18 +465,29 @@ These problems all came up during the first real install and are handled in the 
 | Daily policy watch reports drift | You changed config by hand. Rerun `sudo pi/70-configure.sh` to re-lock |
 | The Gateway takes over a minute on first start | Normal on a Pi (compile cache, state database). Phase 5 waits up to 120 seconds |
 
+These came up with the lab exec node:
+
+| Symptom | Cause and fix |
+|---|---|
+| Every lab command shows a card, even `git` or `ls`, with Allow Always unavailable | The Pi's `ask: always` applies to the lab agent, or the allowlist or the command uses a bare name. Check `oc approvals get --gateway` shows `agents.lab` with `ask=on-miss`, and use full paths |
+| Cards show `/bin/sh -lc "…"` | That's the node's own shell transport. The model sends the plain command |
+| `exec denied: request-failed` | Always seen when two commands ran at once. Also seen intermittently after a single approval (twice after Allow, once on a denied card), without a logged cause and unreproducible since. Ask for one command at a time; if it recurs, note the time and run `oc approvals pending` straight away |
+| `SYSTEM_RUN_DENIED: approval cannot safely bind …` | A chain or inline interpreter code sent to the node. One plain command per request; use a script file for multi-step work |
+| `spawn … EACCES` running `openclaw` as the lab user | `sudo -u` kept a folder the lab user can't enter. Add `cd ~` first |
+
 ## What's been tested
 
 | Item | Status |
 |---|---|
-| Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI |
+| Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI; the lab approvals changes applied with 2026.10.9 |
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
-| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
+| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
-| Acceptance tests 1, 2, 3, 11 | Passed (test 9 not yet run) |
+| Acceptance tests 1, 2, 3, 6, 11 | Passed (test 6: inline code refused on the lab node). Test 9 not yet run |
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
-| Lab VM (phase 8), desktop/computer-use node, sandbox browser image | **Not run yet** |
+| Lab VM host setup and exec node (phase 8) | Run on a Debian 13 VM on Proxmox VE, 2026-11-01. Allowlisted full-path commands ran with no card; a non-allowlisted command got a card; rootless Docker works for the lab user. The `80-nodes.sh finish` copy of `lab-AGENTS.md` and the scripted allowlist were applied by hand, not by a fresh run |
+| Desktop/computer-use node, sandbox browser image | **Not run yet** |
 | Phone-app approvals | Not tested |
 
 ## Repository layout
