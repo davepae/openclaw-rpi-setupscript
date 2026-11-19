@@ -5,8 +5,8 @@ Scripts and config that turn a Raspberry Pi 5 into a dedicated, locked-down
 rootless Docker sandboxes, can't reach your LAN, are reachable only from your
 Tailscale tailnet, and need your approval for every command that runs on the Pi itself.
 
-* **Pinned to:** OpenClaw **2026.11.5** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
-* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed (again on 2026.10.9 on 2026-11-01, and 37 of 37 on 2026.11.5 on 2026-11-19, after three more checks were added). The lab VM and its exec node were set up on Proxmox and tested on 2026-11-01. The desktop/computer-use node **hasn't been run yet**. See [What's been tested](#whats-been-tested).
+* **Pinned to:** OpenClaw **2026.11.6** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
+* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed (again on 2026.10.9 on 2026-11-01, and 37 of 37 on 2026.11.5 and 2026.11.6 on 2026-11-19, after three more checks were added). The lab VM and its exec node were set up on Proxmox and tested on 2026-11-01. The desktop/computer-use node was built, enrolled and tested on 2026-11-19 (test 15 passed); the sandbox browser image **hasn't been run yet**. See [What's been tested](#whats-been-tested).
 
 > [!WARNING]
 > This isn't an official OpenClaw project. It reflects one person's threat model for a home lab.
@@ -252,7 +252,7 @@ secret goes in this file.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.11.5` / `24.22.1` | Pinned versions. Review a newer release with `pi/bump-version.sh` (report only), move the pin with `--apply`, then retest |
+| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.11.6` / `24.22.1` | Pinned versions. Review a newer release with `pi/bump-version.sh` (report only), move the pin with `--apply`, then retest |
 | `OPENCLAW_VERSION_CHECK` | `1` | `99-verify` looks up npm's newest release and warns when it's newer than what runs. `0` skips the lookup (offline) |
 | `ADMIN_USER` | `pi` | Your human admin account (has sudo) |
 | `OC_USER` | `openclaw_user` | The unprivileged agent account |
