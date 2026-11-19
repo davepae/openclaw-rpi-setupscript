@@ -347,12 +347,21 @@ sudo -iu openclaw_user                # a shell as the agent user (PATH includes
 
 Upgrade the Pi first, then the lab VM. The two machines keep **separate** `config/settings.env` files (git never touches them), so each pin is moved on its own machine. Updating the pin only affects fresh installs and rebuilds; what actually runs changes when you run the steps below.
 
+### Find the next version
+
+1. **You get told.** `sudo pi/99-verify.sh` ends its checks with a warning (never a failure) when npm's `latest` is newer than what runs: "OpenClaw X is out (running Y, pinned Z). Review it with: pi/bump-version.sh". `OPENCLAW_VERSION_CHECK="0"` in `config/settings.env` turns the lookup off.
+2. **Look at it, changing nothing.** On the Pi, `pi/bump-version.sh` compares your pin with npm's `latest` and reports two things: whether your `NODE_VERSION` satisfies the release's Node `engines` range, and what changed in `Dockerfile.common` (which `pi/60-images.sh` builds from the pinned tag). To look at something other than `latest`: `pi/bump-version.sh --to 2026.11.6` for an exact version, or `--channel beta` / `--channel extended-stable` for another npm dist-tag. Stable `latest` is the sensible default; the beta can carry changes the stable doesn't.
+3. **Read the release notes yourself.** The script can't. They're on the repository's releases page at `https://github.com/openclaw/openclaw/releases/tag/v<version>`. Look for anything touching policy, nodes, approvals, `doctor` or config migration, because those are what broke or changed things at 2026.11.5.
+4. **Decide.** If the report is clean and the notes are fine, go on. If the Node range isn't satisfied, change `NODE_VERSION` first; the script refuses to apply otherwise (`--force` overrides it).
+
+Then, in order:
+
 ### On the Pi
 
 ```bash
 cd ~/claw/openclaw-pi-setup && git pull
 pi/bump-version.sh                 # report only: newest release, Node engines check, Dockerfile.common changes
-# read the release notes, then:
+# (read the release notes first, see above), then:
 pi/bump-version.sh --apply         # moves OPENCLAW_VERSION in config/settings.env
 sudo ./install-pi.sh --from 50     # reinstalls OpenClaw at the pin; answer N (the default) to "Re-run onboarding?"
 ```
