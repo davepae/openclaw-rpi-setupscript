@@ -142,7 +142,7 @@ flowchart LR
 - Raspberry Pi OS Lite 64-bit (Debian 13 "trixie"), freshly flashed, with an admin user that has sudo and SSH key login.
 - A [Tailscale](https://tailscale.com) tailnet where you can edit the policy file and turn on HTTPS certificates.
 - A model provider: Anthropic, OpenAI, or any OpenAI-compatible endpoint, including a local
-  server such as llama.cpp on your LAN. Set `CUSTOM_IMAGE_INPUT="1"` only if the model accepts images.
+  server such as llama.cpp on your LAN. Set `CUSTOM_IMAGE_INPUT="1"` only if the model accepts images, and `CUSTOM_CONTEXT_WINDOW` to the context size your server really reports.
 - Recommended: a router or firewall (pfSense, OPNsense) where you can put the Pi on its own VLAN.
 
 **Optional**
@@ -202,7 +202,7 @@ Run every script with `sudo` from the repository folder, as your admin user. Eac
 | 8 | `pi/80-nodes.sh` + `lab/*.sh` | Optional lab VM: see [Lab VM](#lab-vm-optional) |
 | 9 | `pi/90-timers.sh` | systemd user timers: weekly image rebuild plus sandbox recreate, daily backup (14 days kept), daily policy watch, weekly audit snapshot |
 | 9b | `pi/95-backup-export.sh` | Optional: nightly encryption of each backup to your `age` public key, for another machine to pull. See [Backups](#backups). Skipped when `BACKUP_AGE_RECIPIENT` is empty |
-| 10 | `pi/99-verify.sh` | 34 automated checks, then prints the manual acceptance tests |
+| 10 | `pi/99-verify.sh` | 37 automated checks, then prints the manual acceptance tests |
 
 ### Lab VM (optional)
 
@@ -261,7 +261,9 @@ secret goes in this file.
 | `TS_TAG_PI` / `TS_TAG_LAB` | `tag:openclaw-pi` / `tag:openclaw-lab` | Tailscale tags. Define them in your tailnet policy first |
 | `PI_TAILNET_NAME` / `PI_TAILNET_IP` | *(empty)* | Filled in after phase 4 |
 | `AUTH_CHOICE` | `custom` | `anthropic`, `openai`, or `custom` (any OpenAI-compatible endpoint) |
-| `CUSTOM_BASE_URL`, `CUSTOM_MODEL_ID`, `CUSTOM_PROVIDER_ID`, `CUSTOM_COMPATIBILITY` | OpenRouter example | The custom endpoint. Compatibility is `openai`, `openai-responses` or `anthropic` |
+| `CUSTOM_BASE_URL`, `CUSTOM_MODEL_ID`, `CUSTOM_PROVIDER_ID`, `CUSTOM_COMPATIBILITY` | OpenRouter example | The custom endpoint. Compatibility is `openai`, `openai-responses` or `anthropic`. `CUSTOM_MODEL_ID` can be written with or without the `<provider>/` prefix |
+| `CUSTOM_CONTEXT_WINDOW` | *(empty)* | Context size in tokens (for example `131072`), as your server reports it. Phase 7 registers `CUSTOM_MODEL_ID` on the provider and sets this value; it's required the first time a model is registered |
+| `PRIMARY_MODEL`, `PDF_MODEL` | placeholders | Written to `agents.defaults.model.primary` and `agents.defaults.pdfModel.primary`. Phase 7 stops if one names a model on `CUSTOM_PROVIDER_ID` that the provider doesn't list. Refs on other providers aren't checked |
 | `CUSTOM_IMAGE_INPUT` | `0` | Set to `1` only if the model accepts images. It decides whether PDFs reach the model as page images and whether computer use can work |
 | `PRIMARY_MODEL` / `PDF_MODEL` | placeholders | `provider/model` references for the default model and the `pdf` tool |
 | `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS` | `3g` / `2` / `512` | Per-container caps. Halve memory on an 8 GB Pi |
@@ -277,13 +279,16 @@ secret goes in this file.
 Arrays in `config/openclaw.patch.json5` replace what's there, so if you change a list by hand,
 mirror the change in the patch or the next phase-7 run will undo it.
 
+> **After any OpenClaw upgrade, run `sudo pi/70-configure.sh`.** That includes the Control UI's update button. An upgrade changes the attested policy, so the drift policy stops matching until 70 re-locks it, and `sudo pi/99-verify.sh` warns when the running version differs from `OPENCLAW_VERSION`. Then update `OPENCLAW_VERSION` in `config/settings.env` to match.
+
 ## Verifying the install
 
-`sudo pi/99-verify.sh` runs 34 automated checks:
+`sudo pi/99-verify.sh` runs 37 automated checks:
 
 - **Identity:** no rootful Docker socket or daemon, no sudo or docker group, rootless with systemd cgroups, file modes.
 - **Exposure:** loopback-only listeners, Serve active, Funnel off, no chat channels, `allowTailscale: false`, config validates.
 - **Policy:** sandbox mode `all`, Gateway approvals `ask: always` with `askFallback: deny`, no policy drift.
+- **Models:** the configured primary and PDF models are registered on the custom provider, the registered context window matches `CUSTOM_CONTEXT_WINDOW`, and no inactive auth profile is left over from an onboarding rerun. It also warns, without counting a failure, when the running version differs from `OPENCLAW_VERSION`.
 - **Egress:** throwaway containers prove that `network: none` has no network, and a bridge container can't reach the LAN gateway or `100.100.100.100` but can reach the internet.
 
 Expected audit output: **0 critical**, with two warnings to accept. `gateway.trusted_proxies_missing`
@@ -332,7 +337,7 @@ sudo -iu openclaw_user                # a shell as the agent user (PATH includes
 - **Images:** rebuilt weekly so Debian and LibreOffice security fixes land.
 - **Approvals:** cards offer allow once, allow always and deny. There's no "allow for this session" option. To approve a long job once, have the agent write a script into the workspace, read it, and approve the single `bash` command that runs it. Answer cards from the terminal with `oc approvals pending` and `oc approvals resolve <id> allow-once` (or `deny`).
 - **Lab allowlist:** edit `config/approvals-lab-exec.json5` (full paths that exist on both the VM and the Pi), then `oc approvals set --node lab-exec --file config/approvals-lab-exec.json5`. A lab card's **Always allow here** saves that exact command for that folder only.
-- **Updates:** the Control UI's update button updates the Pi in place; update the lab node to the same version by hand, then rerun `sudo pi/70-configure.sh`. `oc config set update.checkOnStart false` stops the update prompts. Automatic updates are off by default, and the lab node's self-update is off.
+- **Updates:** the Control UI's update button updates the Pi in place; update the lab node to the same version by hand, then **rerun `sudo pi/70-configure.sh`** (the drift policy won't match the new version until you do). `oc config set update.checkOnStart false` stops the update prompts. Automatic updates are off by default, and the lab node's self-update is off.
 
 ## Backups
 
@@ -485,7 +490,10 @@ These problems all came up during the first real install and are handled in the 
 | "Managed service artifacts changed during publication" | A drop-in appeared mid-install. Phase 5 moves it aside and rewrites it after onboarding |
 | Rerunning onboarding stores the key as "inactive" | Reruns use `--auth-choice skip` and keep the saved credential |
 | `reader` says it has no web access when `main` spawns it | A child can't exceed its requester's tools. `main` needs `web_search` and `web_fetch` (already in the patch) |
-| Daily policy watch reports drift | You changed config by hand. Rerun `sudo pi/70-configure.sh` to re-lock |
+| Daily policy watch reports drift, or the policy attestation no longer matches after an upgrade | You changed config by hand, or OpenClaw was upgraded. Rerun `sudo pi/70-configure.sh` to re-lock |
+| `99-verify` says a configured model isn't registered, or the Gateway uses a model the provider doesn't list | Onboarding reruns skip model registration. Set `CUSTOM_MODEL_ID` (and `CUSTOM_CONTEXT_WINDOW`) in `config/settings.env`, then rerun `sudo pi/70-configure.sh`, which registers it |
+| `models auth list` shows a profile like `<provider>:setup-<uuid>` in state `setup_inactive` | An earlier onboarding rerun left it. Nothing uses it, and the scripts only report it. Confirm which profile is live with `oc models auth list` first. No documented CLI command for removing the inactive one was found; check the Control UI or `openclaw doctor` |
+| "Cannot verify the installed tool authority for Template-managed agent …" after an upgrade to 2026.11.5 | OpenClaw bug [#200795](https://github.com/openclaw/openclaw/issues/200795); the fix ([#200303](https://github.com/openclaw/openclaw/pull/200303), `openclaw templates release <agent>`) merged on 2026-11-17 and isn't in 2026.11.5. Workaround on 11.5: `oc gateway stop`, `oc agents delete <id>` (the agent's workspace and transcripts move to Trash), then `sudo pi/70-configure.sh`, which re-adds the agent from `config/openclaw.patch.json5`. See the runbook before using it |
 | The Gateway takes over a minute on first start | Normal on a Pi (compile cache, state database). Phase 5 waits up to 120 seconds |
 
 These came up with the lab exec node:
@@ -505,6 +513,7 @@ These came up with the lab exec node:
 | Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI; the lab approvals changes applied with 2026.10.9 |
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
+| Model registration, new verify checks (model, context window, inactive profile, version warning) | Unit-tested with a stubbed `openclaw` (`tests/models-test.sh`, 41 cases). **Not yet run on the Pi.** The exact shape of `config get models.providers.<id>.models --json` and `models auth list` output on a real install is assumed; `config patch --dry-run` runs before the real patch |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
 | Acceptance test 14 | Office to PDF passed 2026-11-01 (each about a second; layout correct). PDF to DOCX lost formatting (known LibreOffice limitation). Tested with small files; memory with large files not yet checked |
@@ -519,6 +528,8 @@ These came up with the lab exec node:
 ```
 install-pi.sh                 runs the Pi phases in order (--from NN to redo from a phase)
 lib/common.sh                 shared helpers (as_user, render, write_file, logging)
+lib/models.sh                 custom-provider model registration and checks (used by phase 7 and 99-verify)
+tests/models-test.sh          unit tests for lib/models.sh with a stubbed openclaw; run it anywhere with bash and jq
 config/
   settings.env.example        every setting; copy to settings.env
   openclaw.patch.json5        the OpenClaw policy (agents, sandbox, tools, gateway)

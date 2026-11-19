@@ -3,6 +3,7 @@
 # onboard non-interactively with env-backed secrets, install the Gateway user service,
 # and add the Pi drop-in. Run with sudo from the admin account.
 source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/models.sh"
 require_root
 uid="$(user_uid "$OC_USER")"; home="$(user_home "$OC_USER")"
 # (OpenClaw lands in $home/.openclaw/bin/openclaw)
@@ -92,10 +93,16 @@ if [[ -f "$home/.openclaw/openclaw.json" && $svc_exists -eq 1 ]] \
 else
   # Re-runs keep the model sign-in already saved by a previous run (onboarding otherwise stores the
   # new key as an inactive replacement and stops before installing the Gateway service).
+  # The skip also skips model registration; pi/70-configure.sh registers CUSTOM_MODEL_ID itself.
   if [[ -f "$home/.openclaw/openclaw.json" ]]; then auth="--auth-choice skip"; fi
   as_user "$OC_USER" "set -a; . \$HOME/.openclaw/.env; set +a; openclaw onboard $common $auth"
 fi
 as_user "$OC_USER" "openclaw models auth list" || true
+oc() { as_user "$OC_USER" "openclaw $*"; }
+if [[ -n "$(auth_inactive_profiles)" ]]; then
+  warn "inactive auth profile(s) left by an earlier onboarding run (listed below). Nothing uses them; this script doesn't delete them."
+  auth_inactive_profiles >&2
+fi
 as_user "$OC_USER" "openclaw secrets audit --check" || warn "secrets audit reported findings — read them above"
 
 log "Gateway service drop-in for the Pi"

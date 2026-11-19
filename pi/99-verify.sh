@@ -3,11 +3,12 @@
 # prints the manual acceptance tests (run them from the Control UI). Run with sudo. Read-only
 # except for throwaway test containers.
 source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/models.sh"
 require_root
 trap - ERR; set +e
 pass=0; fail=0
-t() { # t "name" command...   (passes when the command succeeds)
-  if eval "$2" >/dev/null 2>&1; then ok "PASS  $1"; pass=$((pass+1)); else warn "FAIL  $1"; fail=$((fail+1)); fi
+t() { # t "name" command [hint]   (passes when the command succeeds; the hint is shown on failure)
+  if eval "$2" >/dev/null 2>&1; then ok "PASS  $1"; pass=$((pass+1)); else warn "FAIL  $1${3:+  -> $3}"; fail=$((fail+1)); fi
 }
 oc() { as_user "$OC_USER" "openclaw $*"; }
 gw="$(ip -4 route show default | awk '{print $3; exit}')"
@@ -39,8 +40,15 @@ t "allowTailscale is false"                     "[[ \$(oc 'config get gateway.au
 log "Policy"
 t "sandbox mode all for main"                   "oc 'sandbox explain --agent main --json' | jq -e '.sandbox.mode==\"all\"'"
 t "Gateway approvals: ask always + deny fallback" "oc 'approvals get --gateway --json' | jq -e '.file.defaults.ask==\"always\" and .file.defaults.askFallback==\"deny\"'"
-t "policy watch: no drift"                      "oc 'policy watch --agent main --once --json'"
+t "policy watch: no drift"                      "oc 'policy watch --agent main --once --json'" "after an upgrade or any config change, run: sudo pi/70-configure.sh"
 t "cua-computer not explicitly enabled on the Pi" "[[ \$(oc 'config get plugins.entries.cua-computer.enabled' 2>/dev/null | tail -1) != true ]]"
+
+log "Models"
+prim="$(oc 'config get agents.defaults.model.primary' 2>/dev/null | tail -1 | tr -d '"')"
+pdfm="$(oc 'config get agents.defaults.pdfModel.primary' 2>/dev/null | tail -1 | tr -d '"')"
+t "configured models are registered on provider $CUSTOM_PROVIDER_ID" "[[ -n '$prim' ]] && models_check '$prim' '$pdfm'" "run: sudo pi/70-configure.sh (registers CUSTOM_MODEL_ID)"
+t "registered context window matches CUSTOM_CONTEXT_WINDOW"          "models_context_check" "run: sudo pi/70-configure.sh"
+t "no leftover inactive auth profiles"          "[[ -z \$(auth_inactive_profiles) ]]" "run: oc models auth list (reported only; nothing deletes them)"
 
 log "Egress (host + rootless containers)"
 t "$OC_USER cannot reach LAN gateway $gw"       "! sudo -u $OC_USER curl -s -m 5 -o /dev/null http://$gw/"
@@ -57,6 +65,11 @@ log "Platform"
 command -v vcgencmd >/dev/null && t "no throttling (get_throttled=0x0)" "vcgencmd get_throttled | grep -q '=0x0'"
 t "maintenance timers enabled" "as_user $OC_USER 'systemctl --user is-enabled openclaw-image-rebuild.timer openclaw-backup.timer openclaw-policy-watch.timer openclaw-audit.timer'"
 t "egress service active"      "systemctl is-active openclaw-egress.service"
+
+ver="$(oc '--version' 2>/dev/null | head -1)"
+if [[ "$ver" != *"$OPENCLAW_VERSION"* ]]; then
+  warn "running '${ver:-unknown}' but OPENCLAW_VERSION is $OPENCLAW_VERSION. After an upgrade, set OPENCLAW_VERSION to the new version and run: sudo pi/70-configure.sh (re-locks the drift policy)"
+fi
 
 echo; log "Security audit summary"
 oc "security audit --deep --json" 2>/dev/null | jq -r '.findings[] | "\(.severity)\t\(.checkId)\t\(.title)"' | sort | uniq

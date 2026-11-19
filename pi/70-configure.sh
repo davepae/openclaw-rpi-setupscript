@@ -2,6 +2,7 @@
 # Phase 7 — apply the design's openclaw.json, the Gateway host approvals document, and the
 # drift policy; then run the built-in gates. Run with sudo. Safe to rerun.
 source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/models.sh"
 require_root
 home="$(user_home "$OC_USER")"
 stage="$home/.cache/openclaw-config"; install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$stage"
@@ -20,6 +21,10 @@ log "Backing up current config"
 # Keep these config-only snapshots apart from the nightly full backups in ~/backups.
 install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$(user_home "$OC_USER")/backups" "$(user_home "$OC_USER")/backups/config"
 oc "backup create --only-config --verify --output \$HOME/backups/config" || warn "config backup failed (continuing)"
+
+# Onboarding reruns use --auth-choice skip, which skips model registration. Make the provider's model
+# list match the settings before the patch below points agents at PRIMARY_MODEL / PDF_MODEL.
+models_register
 
 log "Config patch (dry run, then apply)"
 oc "config patch --file '$stage/openclaw.patch.json5' --dry-run"
