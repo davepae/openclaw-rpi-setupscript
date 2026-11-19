@@ -3,6 +3,7 @@
 # drift policy; then run the built-in gates. Run with sudo. Safe to rerun.
 source "$(dirname "$0")/../lib/common.sh"
 source "$(dirname "$0")/../lib/models.sh"
+source "$(dirname "$0")/../lib/policy.sh"
 require_root
 home="$(user_home "$OC_USER")"
 stage="$home/.cache/openclaw-config"; install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$stage"
@@ -61,6 +62,16 @@ EOF
 as_user "$OC_USER" "systemctl --user restart openclaw-gateway.service"; sleep 8
 check="$(as_user "$OC_USER" "openclaw policy check --agent main --json" 2>/dev/null || true)"
 okv="$(jq -r '.ok' <<<"$check" 2>/dev/null || echo false)"
+# A config change or an upgrade changes the attestation, so the old accepted hashes stop matching and the
+# check fails on that alone. If the hash mismatch is the only finding, drop the stale locks and check again;
+# the lock is re-applied below. Any other finding still stops the script.
+if [[ "$okv" != "true" ]] && policy_only_stale_hashes "$check"; then
+  warn "accepted policy hashes are stale (config change or upgrade); clearing them and checking again. Old attestation: $(oc 'config get plugins.entries.policy.config.expectedAttestationHash' 2>/dev/null | tail -1 | tr -d '"')"
+  as_user "$OC_USER" "openclaw config unset plugins.entries.policy.config.expectedHash" || true
+  as_user "$OC_USER" "openclaw config unset plugins.entries.policy.config.expectedAttestationHash" || true
+  check="$(as_user "$OC_USER" "openclaw policy check --agent main --json" 2>/dev/null || true)"
+  okv="$(jq -r '.ok' <<<"$check" 2>/dev/null || echo false)"
+fi
 if [[ "$okv" == "true" ]]; then
   ph="$(jq -r '.attestation.policy.hash' <<<"$check")"; ah="$(jq -r '.attestation.attestationHash' <<<"$check")"
   as_user "$OC_USER" "openclaw config patch --stdin" <<EOF
