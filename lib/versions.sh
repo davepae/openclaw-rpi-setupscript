@@ -76,5 +76,20 @@ npm_doc() { curl -fsSL -m "${OC_NET_TIMEOUT:-10}" "$OC_REGISTRY/$1" 2>/dev/null;
 # dockerfile_common <version>: OpenClaw's sandbox Dockerfile.common at that release tag.
 dockerfile_common() { curl -fsSL -m "${OC_NET_TIMEOUT:-20}" "$OC_RAW/v$1/scripts/docker/sandbox/Dockerfile.common" 2>/dev/null; }
 
+# node_versions_tsv <json from 'nodes list --json'>: one "name<TAB>version" line per node that is connected
+# right now. The version is coreVersion, or the plain version field on linux, darwin and win32 nodes when
+# coreVersion is empty (the CLI's own `nodes status` falls back the same way; seen on a real lab-exec node,
+# 2026-11-19: coreVersion null, version "2026.11.5"). A disconnected node is skipped: its last-known
+# version can be stale. Phone and other non-desktop nodes report a UI version in `version`, so they give "".
+node_versions_tsv() {
+  jq -r '.paired[]? | select(.connected == true)
+    | [ (.displayName // .nodeId // "?"),
+        ( .coreVersion
+          // ( ((.platform // "") | ascii_downcase) as $p
+               | if ($p == "linux" or $p == "darwin" or $p == "win32" or $p == "windows") then .version else null end )
+          // "" ) ]
+    | @tsv' <<<"$1" 2>/dev/null
+}
+
 # settings_value <file> <KEY>: the value of KEY="..." in a settings file, read without sourcing it.
 settings_value() { sed -n -E "s/^$2=\"?([^\"# ]*)\"?.*/\\1/p" "$1" | head -1; }

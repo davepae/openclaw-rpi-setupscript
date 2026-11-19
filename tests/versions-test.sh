@@ -55,6 +55,24 @@ eq "settings value node"    "$(settings_value "$work/s.env" NODE_VERSION)"     "
 eq "settings value empty"   "$(settings_value "$work/s.env" OTHER)"            ""
 eq "settings value missing" "$(settings_value "$work/s.env" NOPE)"             ""
 
+# ---- node_versions_tsv
+# 1. the real `nodes list --json` entry from the Pi on 2026-11-19 (fields trimmed to the ones used)
+real='{"pending":[],"paired":[{"nodeId":"628f57c7","displayName":"lab-exec","connected":true,"platform":"linux","version":"2026.11.5","coreVersion":null,"uiVersion":null}]}'
+eq "node: real lab-exec output falls back to version" "$(node_versions_tsv "$real")" $'lab-exec\t2026.11.5'
+eq "node: coreVersion wins when present" \
+  "$(node_versions_tsv '{"paired":[{"displayName":"a","connected":true,"platform":"linux","version":"1.0.0","coreVersion":"2026.11.6"}]}')" $'a\t2026.11.6'
+eq "node: disconnected node skipped" \
+  "$(node_versions_tsv '{"paired":[{"displayName":"a","connected":false,"platform":"linux","version":"2026.10.8"}]}')" ""
+eq "node: phone's version is a UI version, not core" \
+  "$(node_versions_tsv '{"paired":[{"displayName":"phone","connected":true,"platform":"ios","version":"3.4.1"}]}')" $'phone\t'
+eq "node: name falls back to nodeId" \
+  "$(node_versions_tsv '{"paired":[{"nodeId":"abc","connected":true,"platform":"Linux","version":"2026.11.5"}]}')" $'abc\t2026.11.5'
+eq "node: two nodes" \
+  "$(node_versions_tsv '{"paired":[{"displayName":"a","connected":true,"platform":"linux","version":"2026.11.5"},{"displayName":"b","connected":true,"platform":"darwin","coreVersion":"2026.10.9"}]}' | tr '\n' ';')" $'a\t2026.11.5;b\t2026.10.9;'
+eq "node: no paired list"  "$(node_versions_tsv '{"pending":[]}')" ""
+eq "node: not json"        "$(node_versions_tsv 'not json')" ""
+eq "node: empty"           "$(node_versions_tsv '')" ""
+
 # ---- pi/bump-version.sh against fixtures
 reg="$work/reg/openclaw"; raw="$work/raw"; mkdir -p "$reg"
 doc() { printf '{"name":"openclaw","version":"%s","engines":{"node":"%s"}}\n' "$1" "$2" > "$reg/$3"; }
