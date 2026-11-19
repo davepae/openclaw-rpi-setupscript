@@ -140,7 +140,7 @@ Use OpenClaw's sandbox browser container for web automation, and a paired deskto
 - **One node, one job.** Run the desktop node separately from the lab exec node. An explicit `--commands` allowlist would disable computer use, so instead set that node's local exec approvals to `security: "deny"`; `computer` still works, shell does not.
 - **Nothing worth stealing.** No SSH keys, password managers or personal browser profiles in the container; CUA's `browser_prepare` uses ephemeral or named isolated Chromium profiles and never attaches to an existing one.
 - **No route home.** Same egress rules as the lab VM: internet yes, LAN and tailnet no.
-- **Watchable.** For the Control UI Desktop panel, run a VNC server bound to `127.0.0.1` in the container and leave the node's `desktop.host.enabled` on. Screenshots go only to the model, never to chat.
+- **Watchable.** x11vnc runs on the container's loopback, but the Control UI Desktop panel shows the Gateway host's screen, not this node's (checked 2026-11-19), so nothing here consumes it; whether any client can view a paired node's desktop is unverified. Follow the agent through its screenshots in the chat. Screenshots go only to the model, never to chat.
 - **Treat the screen as hostile input.** On-screen text can carry prompt injection; pair computer use only with a strong vision model.
 
 **Tool policy.** The `coding` profile excludes `computer` and `browser`. Add them per agent with `tools.alsoAllow`, and for sandboxed agents also under `tools.sandbox.tools.alsoAllow`, or they're filtered out before the model sees them.
@@ -409,7 +409,7 @@ v2 had fourteen open points. The first install closed seven outright, settled th
 | 11 | Image size and LibreOffice memory | Partly closed | Dev image is 3.28 GB. Small DOCX, XLSX and PPTX files converted in about a second with no memory trouble (test 14, 2026-11-01). Still to check: your largest real file |
 | 12 | Which Pi and which lab host | **Closed 2026-11-01** | The Pi is built. The lab is a Debian 13 VM on a Proxmox VE host, not the NUC. It sits on the main LAN for now; isolation (VLAN or the Proxmox firewall) is deferred |
 | 4 | Sandbox browser on arm64 under rootless Docker | Not tested | Not built (`BUILD_BROWSER_IMAGE=0`). Browser control needs host-published CDP ports; build from your installed tag, enable for one agent, browse |
-| 5 | Desktop node inside a container | Not tested | Lab phase. Run the doctor lint, then test 15 |
+| 5 | Desktop node inside a container | **Closed 2026-11-19** | Built on the VM (2026.11.6), enrolled and approved; the doctor lint passed (1 check, no findings); the node advertised `computer.act` and `screen.snapshot`; test 15 passed (screenshot, opened Mousepad from the menu, typed a line, no shell). Found on the way: the image lacked `git` (the installer refused) and a text editor (the agent looped), both fixed. The node's approvals document is deny-all (`security=deny`, `ask=off`, 0 entries, same hash on the Pi and the node). Not observed: the desktop node refusing a shell command (the lab agent's exec is pinned to `lab-exec`, so it can't be asked); the Control UI Desktop panel does not show this desktop |
 | 14 | Approvals from the phone apps | Not tested | Pair the app over Tailscale, run test 4 with the opt-in, approve from the phone |
 | 1 | Docker backend with rootless Docker | **Closed** | Works with `DOCKER_HOST` in the Gateway unit; test 1 passed |
 | 2 | Workspace ownership | **Closed** | Default user can't write; `docker.user: "0:0"` writes as `openclaw_user` (verify check) |

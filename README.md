@@ -526,7 +526,8 @@ These came up with the lab exec node:
 | Rootless Docker sandbox backend, `user: "0:0"` workspace ownership, egress owner match for containers | Confirmed on hardware |
 | A local OpenAI-compatible model with vision; delegation `main` → `reader` → SearXNG | Worked |
 | Lab VM host setup and exec node (phase 8) | Run on a Debian 13 VM on Proxmox VE, 2026-11-01. Allowlisted full-path commands ran with no card; a non-allowlisted command got a card; rootless Docker works for the lab user. The `80-nodes.sh finish` copy of `lab-AGENTS.md` and the scripted allowlist were applied by hand, not by a fresh run |
-| Desktop/computer-use node, sandbox browser image | **Not run yet** |
+| Desktop/computer-use node | **Ran on the lab VM on 2026-11-19.** Enrolled, approved, connected on 2026.11.6; doctor lint clean; deny-all approvals document stored on the node; test 15 passed (screenshot, opened Mousepad, typed a line, no shell). The desktop node refusing a shell command was not observed directly, and the Control UI Desktop panel does not show it (it shows the Gateway host's screen) |
+| Sandbox browser image | **Not run yet** |
 | Phone-app approvals | Not tested |
 
 ## Repository layout
