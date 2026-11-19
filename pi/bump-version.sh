@@ -107,7 +107,9 @@ ok "OPENCLAW_VERSION is now $target in $file"
 cat <<EOF
 
 Next, in this order (nothing below has been run):
-  Pi, rebuild path:     sudo ./install-pi.sh --from 50      (installs $target, rebuilds the images)
+  Pi, one command:      sudo pi/update.sh                   (installs $target, updates plugins, rebuilds images if needed,
+                                                             runs 70-configure and 99-verify)
+  Pi, by hand:          sudo ./install-pi.sh --from 50      (installs $target, rebuilds the images)
   Pi, already updated:  skip that (for example if you used the Control UI's update button)
   Pi, either way:       sudo pi/70-configure.sh             (re-registers models, re-locks the policy hashes)
                         sudo pi/99-verify.sh

@@ -80,7 +80,7 @@ if [[ "${OPENCLAW_VERSION_CHECK:-1}" != 0 ]]; then
     if [[ "$(ver_cmp "$OPENCLAW_VERSION" "$latest")" == -1 ]]; then
       warn "OpenClaw $latest is out (running ${running:-unknown}, pinned $OPENCLAW_VERSION). Review it with: pi/bump-version.sh"
     else
-      warn "OpenClaw $latest is out and already pinned, but the Pi runs ${running:-an unknown version}. Update it (Control UI update button, or sudo ./install-pi.sh --from 50), then run: sudo pi/70-configure.sh"
+      warn "OpenClaw $latest is out and already pinned, but the Pi runs ${running:-an unknown version}. Update it: sudo pi/update.sh (or the Control UI update button, then sudo pi/70-configure.sh)"
     fi
   fi
 fi

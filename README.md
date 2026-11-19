@@ -283,7 +283,7 @@ mirror the change in the patch or the next phase-7 run will undo it.
 
 > **After any OpenClaw upgrade, run `sudo pi/70-configure.sh`.** That includes the Control UI's update button. An upgrade changes the attested policy, so the drift policy stops matching until 70 re-locks it, and `sudo pi/99-verify.sh` warns when the running version differs from `OPENCLAW_VERSION`, when npm has a newer release, or when a connected lab node is on a different version. Then update `OPENCLAW_VERSION` in `config/settings.env` to match (`pi/bump-version.sh --apply` does that, after a report).
 
-> **Keeping the version pin current.** `sudo pi/99-verify.sh` warns when npm has a newer release (and when a connected lab node is on a different version), `pi/bump-version.sh` reviews it, and `sudo lab/update-node.sh --to <version>` updates the lab node and writes the pin into the lab VM's own `settings.env`. The full path of `lab/update-node.sh` is unit-tested but hasn't run for real; **the next lab update is its first real run**, so read its output and check `pi/80-nodes.sh status` and `pi/99-verify.sh` afterwards. Steps: runbook, *Day-2 operations*.
+> **Keeping the version pin current.** `sudo pi/99-verify.sh` warns when npm has a newer release (and when a connected lab node is on a different version), `pi/bump-version.sh` reviews it, `sudo pi/update.sh --to <version>` upgrades the Pi in one go, and `sudo lab/update-node.sh --to <version>` updates the lab node and writes the pin into the lab VM's own `settings.env`. Both update scripts are unit-tested but haven't run for real (only the lab script's already-current case has); **the next Pi upgrade and the next lab update are their first real runs**, so read their output and check `pi/80-nodes.sh status` and `pi/99-verify.sh` afterwards. Steps: [Upgrading OpenClaw](#upgrading-openclaw-pi-and-lab-vm).
 
 ## Verifying the install
 
@@ -357,6 +357,16 @@ Upgrade the Pi first, then the lab VM. The two machines keep **separate** `confi
 Then, in order:
 
 ### On the Pi
+
+```bash
+cd ~/claw/openclaw-pi-setup && git pull
+pi/bump-version.sh                 # report only (see above); read the release notes
+sudo pi/update.sh --to 2026.11.6   # the version you vetted; add --yes to skip the confirmation
+```
+
+`pi/update.sh` runs every step below in order: it checks the release's Node range, writes the pin, reinstalls OpenClaw (phase 50, answering N to the onboarding question), updates lagging plugins with the Gateway stopped, rebuilds the sandbox images only when `Dockerfile.common` changed, runs `70-configure.sh`, and finishes with `99-verify.sh`. If the install fails or lands on the wrong version it puts the pin back, and every later problem (a plugin, the images, 70, 99) is reported at the end with a non-zero exit. With no `--to` it upgrades to the pin already in `config/settings.env` (for example after `bump-version.sh --apply`). **It is unit-tested (`tests/pi-update-test.sh`) but has not run on the Pi yet, so the next Pi upgrade is its first real run: stay and read its output.** It restarts the production Gateway, so agent turns in progress are interrupted.
+
+**The same steps by hand** (if you'd rather run them yourself, or the script stopped partway):
 
 ```bash
 cd ~/claw/openclaw-pi-setup && git pull
@@ -574,6 +584,7 @@ These came up with the lab exec node:
 | Model registration, new verify checks (model, context window, inactive profile, version warning) | Unit-tested with a stubbed `openclaw` (`tests/models-test.sh`, 41 cases; `tests/policy-test.sh`, 8 cases). **Ran on the Pi on 2026-11-19 (2026.11.5):** model registration (iq3_xxs added at 131072; a second run changed nothing), the stale-hash re-lock, and `99-verify` at 37 of 37 checks, with the version warning shown as intended. The exact shape of `config get models.providers.<id>.models --json` and `models auth list` output on a real install is assumed; `config patch --dry-run` runs before the real patch |
 | Lab egress DNS and in-place lab node update | **Ran on the lab VM on 2026-11-19.** The 2026.10.9 node was updated in place to 2026.11.5, then to 2026.11.6, and stayed paired (same device ID, allowlist unchanged, allowlisted `ls` ran silently, `whoami` raised a card). `oclab` had lost DNS because Tailscale made MagicDNS the resolver; the explicit `LAB_DNS_SERVERS` entry survived a reboot. The script change that allows MagicDNS whenever Tailscale is installed is unit-tested (`tests/egress-test.sh`, 17 cases) and **passed on the lab VM after a reboot (2026-11-19):** `sudo lab/test-egress.sh --reboot-test` rebuilt the service with only the first resolver, and after the reboot all 14 checks passed with MagicDNS allowed (IPv4 and IPv6) although the service's own resolver list didn't name it. `lab/test-egress.sh` is also unit-tested against stubs (`tests/lab-egress-test.sh`, 24 cases) |
 | `lab/update-node.sh` (in-place lab node update that writes the VM's version pin) | `tests/lab-update-test.sh`, 19 cases with a fake `openclaw` and file:// npm fixtures; four deliberate faults (pin written early, engines check skipped, doctor run unasked, no version check) were each caught. **Ran on the lab VM, 2026-11-19, for the already-current case only:** `sudo lab/update-node.sh --to 2026.11.6` found the node already on 2026.11.6, skipped the reinstall and confirmed the pin. The stop, reinstall, restart and `doctor --fix` path is unit-tested but has not run for real; the manual steps it automates did run there on 2026-11-19 |
+| `pi/update.sh` (one-command Pi upgrade) | `tests/pi-update-test.sh`, 23 cases with stub phase scripts, a fake `openclaw` and file:// npm and `Dockerfile.common` fixtures; seven deliberate faults (pin not restored when phase 50 fails, engines check skipped, 70 skipped, Gateway not restarted after a plugin update, confirmation ignored, images always rebuilt, version not verified after install) were each caught. **Not yet run on the Pi.** The steps it automates did run there on 2026-11-19 (install, Firecrawl update with the Gateway stopped, `70-configure.sh`, `99-verify.sh`) |
 | Version pin tooling (`pi/bump-version.sh`, the `99-verify` version warnings) | `tests/versions-test.sh`, 63 cases, no network. **Ran for real, read-only, on 2026-11-19:** the report against npm and GitHub (`latest` was 2026.11.6; Node range satisfied; `Dockerfile.common` byte-identical to 2026.11.5; the beta channel showed a real diff), and the `99-verify` warning block with stubbed inputs. **Ran on the Pi, 2026-11-19:** `99-verify` 37 of 37 with the new warnings, and `bump-version.sh` against a real `settings.env` including `--apply`. The lab-node check reads `nodes list --json`: a live `lab-exec` showed `coreVersion` null with the version in `version` (platform `linux`), so the check falls back to `version` the way the CLI does, and a unit test uses that real output. A lab node on a different version than the Pi, and the warning firing for it, have been tested only with stubbed input |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
@@ -594,6 +605,7 @@ lib/models.sh                 custom-provider model registration and checks (use
 lib/versions.sh               version compare, engines-range check, npm and GitHub lookups (used by bump-version and 99-verify)
 tests/models-test.sh          unit tests for lib/models.sh with a stubbed openclaw; run it anywhere with bash and jq
 tests/egress-test.sh          unit tests for pi/egress-rules.sh with stubbed iptables; needs no root
+tests/pi-update-test.sh       unit tests for pi/update.sh with stub phase scripts, a fake openclaw and file:// npm fixtures; needs no root
 tests/lab-update-test.sh      unit tests for lab/update-node.sh with a fake openclaw and file:// npm fixtures; needs no root
 tests/lab-egress-test.sh      unit tests for lab/test-egress.sh with stubbed iptables, sudo and curl; needs no root
 tests/versions-test.sh        unit tests for lib/versions.sh and pi/bump-version.sh against file:// fixtures; no network
@@ -607,7 +619,7 @@ config/
   policy.jsonc                drift policy (hash-locked by phase 7)
   tailnet-policy.hujson       Tailscale tags and grants fragment
 images/Dockerfile.dev         sandbox dev image (toolchains plus Office/PDF tooling)
-pi/                           Pi phases 00–99 (95 = encrypted backup export), the egress rules script and bump-version.sh (reviews and moves the version pin)
+pi/                           Pi phases 00–99 (95 = encrypted backup export), the egress rules script, bump-version.sh (reviews and moves the version pin) and update.sh (upgrades OpenClaw in place, start to finish)
 lab/                          lab VM, exec node and desktop node scripts, test-egress.sh (checks the lab firewall) and update-node.sh (updates the lab node in place and keeps the VM's version pin in step); lab/desktop/ is the container
 docs/runbook.md               end-to-end setup runbook
 docs/design.md                architecture and hardening design (v3)
