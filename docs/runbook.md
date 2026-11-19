@@ -365,6 +365,14 @@ It then prints the audit findings and the manual tests below.
 
 Run OpenClaw commands as the agent user with `oc …` from your admin account (installed by phase 5), or from a shell opened with `sudo -iu openclaw_user`.
 
+> **Keeping the version pin current.** The tooling for this is in place:
+>
+> 1. `sudo pi/99-verify.sh` warns (without failing) when npm has a newer release than the one running, and when a connected lab node is on a different version.
+> 2. `pi/bump-version.sh` reviews the newer release (Node `engines` range, `Dockerfile.common` changes) and moves the pin only with `--apply`.
+> 3. On the lab VM, `sudo lab/update-node.sh --to <version>` updates the node in place and writes the pin into that VM's own `settings.env`.
+>
+> **Not yet proven:** the full path of `lab/update-node.sh` (stop, reinstall, restart, `doctor --fix`, verify, write the pin) is unit-tested but has not run for real. Only its already-current case has run on the VM (2026-11-19). **The next lab update is its first real run: read its output, and check `sudo pi/80-nodes.sh status` and `sudo pi/99-verify.sh` afterwards.**
+
 | Task | Command |
 | --- | --- |
 | See and answer approvals without the UI | `openclaw approvals pending`; `openclaw approvals resolve <id> allow-once\|allow-always\|deny` |
