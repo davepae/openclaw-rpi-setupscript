@@ -47,7 +47,14 @@ oc "approvals get --gateway"
 
 log "Drift policy (bundled Policy plugin)"
 install -m 600 -o "$OC_USER" -g "$OC_USER" "$stage/policy.jsonc" "$home/workspace/policy.jsonc"
-oc "plugins enable policy"
+# Enabling an already-enabled plugin makes the Gateway swap in a new plugin generation, which waits for
+# any agent turn (for example an open Control UI session) that holds the old one and fails after 60 s.
+# So only enable it the first time.
+if [[ "$(oc 'config get plugins.entries.policy.enabled' 2>/dev/null | tail -1 || true)" == true ]]; then
+  ok "policy plugin already enabled"
+else
+  oc "plugins enable policy"
+fi
 as_user "$OC_USER" "openclaw config patch --stdin" <<'EOF'
 { plugins: { entries: { policy: { enabled: true, config: { enabled: true, path: "policy.jsonc", workspaceRepairs: false } } } } }
 EOF
