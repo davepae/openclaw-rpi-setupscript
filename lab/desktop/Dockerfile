@@ -6,10 +6,12 @@ ARG NODE_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 # Linux CUA prerequisites from OpenClaw's computer-use docs, plus a browser, a VNC server for the
 # Control UI Desktop panel (bound to the container's loopback only), and basic fonts.
+# mousepad: a plain text editor for acceptance test 15 (type into an editor). Without one the agent
+# loops through the openbox menu looking for it. The image deliberately has no terminal emulator.
 # git is required by OpenClaw's install-cli.sh (it stops with "Git missing and sudo unavailable" otherwise).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       at-spi2-core dbus-x11 gir1.2-gtk-3.0 jq openbox python3-gi x11-utils xdotool xvfb \
-      ca-certificates curl git chromium x11vnc fonts-dejavu procps \
+      ca-certificates curl git chromium x11vnc fonts-dejavu procps mousepad \
   && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --shell /bin/bash desktop \
   && install -d -o desktop -g desktop /opt/openclaw /home/desktop/.openclaw
