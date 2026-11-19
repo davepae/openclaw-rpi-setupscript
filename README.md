@@ -5,8 +5,8 @@ Scripts and config that turn a Raspberry Pi 5 into a dedicated, locked-down
 rootless Docker sandboxes, can't reach your LAN, are reachable only from your
 Tailscale tailnet, and need your approval for every command that runs on the Pi itself.
 
-* **Pinned to:** OpenClaw **2026.10.9** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
-* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed (again on 2026.10.9 on 2026-11-01). The lab VM and its exec node were set up on Proxmox and tested on 2026-11-01. The desktop/computer-use node **hasn't been run yet**. See [What's been tested](#whats-been-tested).
+* **Pinned to:** OpenClaw **2026.11.5** and Node **24.22.1**, on Raspberry Pi OS Lite 64-bit (Debian 13 "trixie").
+* **Status:** the Pi phases ran end to end on a 16 GB Pi 5 with an NVMe drive on 2026-10-31, and all 34 automated checks passed (again on 2026.10.9 on 2026-11-01, and 37 of 37 on 2026.11.5 on 2026-11-19, after three more checks were added). The lab VM and its exec node were set up on Proxmox and tested on 2026-11-01. The desktop/computer-use node **hasn't been run yet**. See [What's been tested](#whats-been-tested).
 
 > [!WARNING]
 > This isn't an official OpenClaw project. It reflects one person's threat model for a home lab.
@@ -252,7 +252,7 @@ secret goes in this file.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.10.9` / `24.22.1` | Pinned versions. Bump them deliberately and retest |
+| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.11.5` / `24.22.1` | Pinned versions. Bump them deliberately and retest |
 | `ADMIN_USER` | `pi` | Your human admin account (has sudo) |
 | `OC_USER` | `openclaw_user` | The unprivileged agent account |
 | `TIMEZONE` | `America/Chicago` | Any name from `timedatectl list-timezones` |
@@ -512,7 +512,7 @@ These came up with the lab exec node:
 |---|---|
 | Config patches and approvals documents | `openclaw config validate` and `approvals set` with the real 2026.10.8 CLI; the lab approvals changes applied with 2026.10.9 |
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
-| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01. Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
+| Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01, and 37/37 on 2026.11.5 on 2026-11-19 (the Pi was updated through the Control UI; phases 7 and 10 were rerun). Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Model registration, new verify checks (model, context window, inactive profile, version warning) | Unit-tested with a stubbed `openclaw` (`tests/models-test.sh`, 41 cases; `tests/policy-test.sh`, 8 cases). **Ran on the Pi on 2026-11-19 (2026.11.5):** model registration (iq3_xxs added at 131072; a second run changed nothing), the stale-hash re-lock, and `99-verify` at 37 of 37 checks, with the version warning shown as intended. The exact shape of `config get models.providers.<id>.models --json` and `models auth list` output on a real install is assumed; `config patch --dry-run` runs before the real patch |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
