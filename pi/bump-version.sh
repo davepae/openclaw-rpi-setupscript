@@ -100,11 +100,8 @@ if (( blocked && ! force )); then
   die "not applying: see the warnings above (--force overrides, at your own risk)"
 fi
 
-# Rewrite the one line in place (keeps the file's owner and mode), then check the result.
-new="$(sed -E "s/^(OPENCLAW_VERSION=)\"[^\"]*\"/\\1\"$target\"/" "$file")"
-[[ "$(grep -c '^OPENCLAW_VERSION=' <<<"$new")" == 1 && "$(grep '^OPENCLAW_VERSION=' <<<"$new")" == OPENCLAW_VERSION=\"$target\"* ]] \
+settings_set "$file" OPENCLAW_VERSION "$target" \
   || die "could not rewrite OPENCLAW_VERSION in $file (is it written as OPENCLAW_VERSION=\"...\"?); no change made"
-printf '%s\n' "$new" >"$file"
 ok "OPENCLAW_VERSION is now $target in $file"
 
 cat <<EOF
@@ -114,9 +111,8 @@ Next, in this order (nothing below has been run):
   Pi, already updated:  skip that (for example if you used the Control UI's update button)
   Pi, either way:       sudo pi/70-configure.sh             (re-registers models, re-locks the policy hashes)
                         sudo pi/99-verify.sh
-  Lab VM:               update in place (runbook, phase 8, "Updating the lab node in place"),
-                        or rerun lab/20-exec-node.sh and lab/30-desktop-node.sh
-  Also:                 set the same version in the lab VM's own settings.env; the comment beside
-                        NODE_VERSION in config/settings.env.example names the engines range of the
-                        previous release and is not changed by this script.
+  Lab VM:               sudo lab/update-node.sh --to $target   (updates the node in place and writes the
+                        pin into the lab VM's own settings.env; this file is separate from the Pi's)
+  Also:                 the comment beside NODE_VERSION in config/settings.env.example names the engines
+                        range of the previous release and is not changed by this script.
 EOF
