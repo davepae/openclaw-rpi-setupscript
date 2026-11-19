@@ -31,6 +31,7 @@ Tailscale tailnet, and need your approval for every command that runs on the Pi 
 - [Configuration reference](#configuration-reference)
 - [Verifying the install](#verifying-the-install)
 - [Day-to-day operation](#day-to-day-operation)
+- [Upgrading OpenClaw (Pi and lab VM)](#upgrading-openclaw-pi-and-lab-vm)
 - [Backups](#backups)
 - [Optional: elevated mode](#optional-elevated-mode)
 - [Optional: self-hosted search (SearXNG and Firecrawl)](#optional-self-hosted-search-searxng-and-firecrawl)
@@ -341,6 +342,49 @@ sudo -iu openclaw_user                # a shell as the agent user (PATH includes
 - **Approvals:** cards offer allow once, allow always and deny. There's no "allow for this session" option. To approve a long job once, have the agent write a script into the workspace, read it, and approve the single `bash` command that runs it. Answer cards from the terminal with `oc approvals pending` and `oc approvals resolve <id> allow-once` (or `deny`).
 - **Lab allowlist:** edit `config/approvals-lab-exec.json5` (full paths that exist on both the VM and the Pi), then `oc approvals set --node lab-exec --file config/approvals-lab-exec.json5`. A lab card's **Always allow here** saves that exact command for that folder only.
 - **Updates:** the Control UI's update button updates the Pi in place; update the lab node to the same version by hand, then **rerun `sudo pi/70-configure.sh`** (the drift policy won't match the new version until you do). `oc config set update.checkOnStart false` stops the update prompts. Automatic updates are off by default, and the lab node's self-update is off.
+
+## Upgrading OpenClaw (Pi and lab VM)
+
+Upgrade the Pi first, then the lab VM. The two machines keep **separate** `config/settings.env` files (git never touches them), so each pin is moved on its own machine. Updating the pin only affects fresh installs and rebuilds; what actually runs changes when you run the steps below.
+
+### On the Pi
+
+```bash
+cd ~/claw/openclaw-pi-setup && git pull
+pi/bump-version.sh                 # report only: newest release, Node engines check, Dockerfile.common changes
+# read the release notes, then:
+pi/bump-version.sh --apply         # moves OPENCLAW_VERSION in config/settings.env
+sudo ./install-pi.sh --from 50     # reinstalls OpenClaw at the pin; answer N (the default) to "Re-run onboarding?"
+```
+
+The install happens before that prompt, and `70-configure.sh` (below) restarts the Gateway, so skipping onboarding is right for an upgrade. `--from 50` runs phase 50 only: later phases that already completed are skipped, which is why the next steps are run by hand.
+
+1. **Sandbox images**, only if the `bump-version.sh` report showed `Dockerfile.common` changed: `sudo pi/60-images.sh --rebuild`. (The weekly timer rebuilds them anyway.)
+2. **Installed plugins** (Firecrawl, SearXNG): `oc plugins update --all --dry-run`. If one lags the new version, `plugins update` only works with the Gateway stopped:
+   ```bash
+   sudo -u openclaw_user env XDG_RUNTIME_DIR=/run/user/$(id -u openclaw_user) systemctl --user stop openclaw-gateway.service
+   oc plugins update firecrawl            # whichever the dry run listed
+   sudo -u openclaw_user env XDG_RUNTIME_DIR=/run/user/$(id -u openclaw_user) systemctl --user start openclaw-gateway.service
+   ```
+   A plugin with no newer release (SearXNG at 2026.11.5 while core was 2026.11.6) stays in the drift line and needs nothing.
+3. **Re-lock the policy and restart the Gateway:** `sudo pi/70-configure.sh`. An upgrade changes the attested policy, so this is required.
+4. **Check:** `sudo pi/99-verify.sh` (37 of 37 expected, no version warnings), then ask an agent for a page fetch.
+
+The Control UI's update button also updates the Pi in place. If you use it, still run steps 3 and 4 and update the lab VM by hand. Rolling back isn't tested; `70-configure.sh` saves a config backup on every run in `~openclaw_user/backups/config/`.
+
+### On the lab VM
+
+```bash
+cd ~/openclaw-pi-setup && git pull
+sudo lab/update-node.sh --to 2026.11.6      # use the version you put on the Pi
+```
+
+The script checks the release's Node range, updates the node in place (stop, reinstall, start), waits for it to settle, offers `openclaw doctor --fix` if the credential migration is due, confirms the running version, and only then writes the pin into this VM's `settings.env`. It keeps the pairing and approvals, so no join URL is needed. **The full path of this script is unit-tested but hasn't run for real yet, so the next lab update is its first real run: read its output.**
+
+- **Desktop node**, if you built one: `sudo lab/30-desktop-node.sh` rebuilds the image at the new version and keeps the pairing volume (no join URL). The update script prints a reminder when it finds the container.
+- **Check, back on the Pi:** `sudo pi/80-nodes.sh status` (`lab-exec` and `lab-desktop` connected, same device IDs, nothing pending) and `sudo pi/99-verify.sh` (no lab-node version warning).
+
+Manual steps for the lab node, the credential-migration notes, and what to expect are in the [runbook](docs/runbook.md) (phase 8, *Updating the lab node in place*).
 
 ## Backups
 
