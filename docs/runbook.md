@@ -17,6 +17,7 @@ The scripts in this repository build everything in the [design](design.md): a Pi
 | Lab VM | Separate x86 host (not the NUC), Debian 13 VM, 4 vCPU / 8 GB / 60 GB, snapshot-capable. Ideally on its own VLAN; see *Lab VM on Proxmox* in phase 8 if it can't be |
 | pfSense | A VLAN or interface each for the Pi and the lab VM |
 | Tailscale | Tailnet admin access to edit the policy file |
+| Fixed LAN addresses | A DHCP reservation in pfSense for the Pi, the lab VM, your model server and any search host (the NUC). The Pi and the lab talk by tailnet name, so a changed lab address doesn't break that link. But `EGRESS_ALLOW_HOSTS` entries are raw IPs written into the firewall once: if the model or search host moves, the agent silently loses it while the firewall keeps allowing the old address. Any pfSense or Proxmox rule that names the lab VM's address also goes stale |
 | Model provider | An OpenAI-compatible endpoint (`AUTH_CHOICE=custom`, key as `CUSTOM_API_KEY`). It can be a local server, such as llama.cpp on your LAN; then add it to `EGRESS_ALLOW_HOSTS` as `ip:port`, allow it in pfSense, and set `CUSTOM_IMAGE_INPUT` to `"1"` if it accepts images or `"0"` if it's text-only. `anthropic` and `openai` are also supported |
 | Your devices | A browser on the tailnet for the Control UI; optional OpenClaw iOS/Android app for approvals |
 
@@ -130,7 +131,7 @@ Before closing your SSH session, confirm key login works in a second terminal: p
 sudo pi/20-egress.sh
 ```
 
-This installs `openclaw-egress.service`, which inserts an `OC_EGRESS` chain at the top of `OUTPUT` at boot. For `openclaw_user`'s sockets it allows loopback, established traffic, DNS to `DNS_SERVERS`, and any `EGRESS_ALLOW_HOSTS`. It rejects 10/8, 172.16/12, 192.168/16, 100.64/10 (tailnet), 169.254/16, multicast, and IPv6 ULA, link-local and multicast. Rootless containers leave through that user's network helper, so the same rules cover the builder sandbox. Phase 10 tests this. The script ends by checking that the user can't reach your LAN gateway but can reach the internet.
+This installs `openclaw-egress.service`, which inserts an `OC_EGRESS` chain at the top of `OUTPUT` at boot. For `openclaw_user`'s sockets it allows loopback, established traffic, DNS to `DNS_SERVERS` (and to Tailscale's MagicDNS resolver on port 53 whenever Tailscale is installed), and any `EGRESS_ALLOW_HOSTS`. It rejects 10/8, 172.16/12, 192.168/16, 100.64/10 (tailnet), 169.254/16, multicast, and IPv6 ULA, link-local and multicast. Rootless containers leave through that user's network helper, so the same rules cover the builder sandbox. Phase 10 tests this. The script ends by checking that the user can't reach your LAN gateway but can reach the internet.
 
 ### Phase 3 — Rootless Docker
 
@@ -235,6 +236,27 @@ If OpenClaw offers to update during such a command, pick **Exit**. Updates are d
 - **Elevated isn't needed for the lab.** The lab agent's exec is pinned to the node either way, and `/elevated on` doesn't change where its commands run.
 
 **Lab VM on Proxmox.** This build's lab VM is a Debian 13 VM on Proxmox VE (free edition) on the main LAN, because one switch doesn't support VLANs. Its egress firewall (`OC_EGRESS`, owner-matched to the lab user) still blocks private addresses except DNS and the Pi's tailnet IP, so the agent's commands and containers can't reach the rest of the LAN. Nothing stops the rest of the LAN from reaching the VM, though. Until a VLAN is possible, the Proxmox VE firewall (included in the free edition) can close that gap: enable it at the datacenter level and on the VM and its network device, set the VM's inbound policy to DROP, and allow only SSH from your admin machine. Tailscale connects outbound, so the Pi can still reach the node (direct connections may fall back to a relay unless UDP 41641 is allowed in). *Not yet tested here.* Read Proxmox's firewall documentation before turning on the datacenter firewall, because it also filters the Proxmox host itself. Snapshot the VM before and after phase 8.
+
+**Updating the lab node in place** (done 2026-11-19, 2026.10.9 → 2026.11.5). The Pi and the lab node don't have to match, but keep them close; `pi/99-verify.sh` only checks the Pi. This keeps the pairing, device ID and approvals, so it needs no join URL. As `labadmin` on the VM, with `oc_lab` defined as in the previous section:
+
+```bash
+# Lab VM
+oc_lab() { sudo -u oclab -H env XDG_RUNTIME_DIR=/run/user/$(id -u oclab) bash -lc "cd ~; $*"; }
+oc_lab '~/.openclaw/bin/openclaw node stop'
+oc_lab "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --prefix \$HOME/.openclaw --version 2026.11.5 --node-version 24.22.1 --no-onboard"
+oc_lab '~/.openclaw/bin/openclaw node start'
+oc_lab '~/.openclaw/bin/openclaw approvals get'
+```
+
+Set `OPENCLAW_VERSION` in the VM's `config/settings.env` to match, so a rebuild gets the same version. The installer needs `oclab` to resolve `openclaw.ai` and the npm registry; see the DNS row under Troubleshooting if it can't.
+
+What to expect, from the 2026-11-19 run:
+
+- **`approvals get` may refuse with "Client credential migration is incomplete or stale".** Stop the node, run `oc_lab '~/.openclaw/bin/openclaw doctor --fix'`, then start it. On that run there were no legacy identity files (`~/.openclaw/identity` didn't exist) and the credential store reported `schema=1, pending=0`, so the pairing was untouched. Doctor saved a pre-migration copy of the state database (`~/.openclaw/state/openclaw.sqlite.pre-startup-migration-….bak`) and `openclaw.json.bak`; keep them until the node has reconnected.
+- **Doctor also changed things you didn't ask for:** it disabled three skills that can't run on the VM (`openai-whisper-api`, `sherpa-onnx-tts`, `trello`), refreshed the plugin registry, and **added a local `gateway.auth` token (mode `token`) to `openclaw.json`**, which the pre-doctor backup didn't have. Nothing listens for it on the VM (`ss -ltnp` showed no OpenClaw listeners), but the lab agent can read the file because `cat` is on the allowlist. Which doctor step writes it isn't confirmed. Removing it (`openclaw config unset gateway.auth`) hasn't been tested on a node.
+- **Doctor messages that don't apply to a node:** "gateway.mode is unset; gateway start will be blocked" (don't set it; this VM isn't a Gateway), the memory-search and heartbeat notices, and the Telegram, WhatsApp and channel-owner suggestions.
+- **A "state database is busy / offline maintenance" error straight after the node starts** is the node's own startup maintenance; wait a minute and retry.
+- **Check from the Pi:** `sudo pi/80-nodes.sh status` should show `lab-exec` connected on the new version with the same device ID and nothing pending. Then run the lab acceptance test (an allowlisted `/usr/bin/ls` runs with no card; `/usr/bin/whoami` raises one, which you deny).
 
 **Desktop node.**
 
@@ -341,7 +363,7 @@ Run OpenClaw commands as the agent user with `oc …` from your admin account (i
 | Cut computer use only | Add `gateway.nodes.commands.deny: ["computer.act"]` (`openclaw config patch --stdin`) |
 | Turn elevated off again | `oc config unset tools.elevated.allowFrom`, then `sudo pi/70-configure.sh` to restart and re-lock (setting `ENABLE_ELEVATED="0"` alone doesn't remove it) |
 | Rebuild images now | `sudo pi/60-images.sh --rebuild && sudo -iu openclaw_user openclaw sandbox recreate --all --force` |
-| Upgrade OpenClaw | Bump `OPENCLAW_VERSION` and check `NODE_VERSION` against the release's `engines`. On the Pi run `sudo ./install-pi.sh --from 50`; on the lab VM rerun `lab/20-exec-node.sh` with a fresh join URL and `lab/30-desktop-node.sh` (keeps pairing). Then `sudo pi/70-configure.sh` to re-lock the policy hashes. **Don't skip this:** until it runs, the drift policy won't match the new version. The Control UI's update button also updates the Pi in place (that's how it reached 2026.10.9); if you use it, update the lab node to the same version by hand and rerun `70-configure.sh` |
+| Upgrade OpenClaw | Bump `OPENCLAW_VERSION` and check `NODE_VERSION` against the release's `engines`. On the Pi run `sudo ./install-pi.sh --from 50`; on the lab VM either update in place (phase 8, *Updating the lab node in place*) or rerun `lab/20-exec-node.sh` with a fresh join URL and `lab/30-desktop-node.sh` (keeps pairing). Then `sudo pi/70-configure.sh` to re-lock the policy hashes. **Don't skip this:** until it runs, the drift policy won't match the new version. The Control UI's update button also updates the Pi in place (that's how it reached 2026.10.9); if you use it, update the lab node to the same version by hand and rerun `70-configure.sh` |
 | Stop update notices | `oc config set update.checkOnStart false` stops the Gateway's daily version check and its update prompts. Automatic updates are already off by default (`update.auto.enabled`), and the lab node's self-update is off (`nodeHost.autoUpdate.enabled false`) |
 | Answer a lab card from the terminal | `oc approvals pending`; `oc approvals resolve <id> allow-once` (or `deny`) |
 | Change the lab allowlist | Edit `config/approvals-lab-exec.json5` (full paths that exist on both the VM and the Pi), then `oc approvals set --node lab-exec --file config/approvals-lab-exec.json5` |
@@ -360,7 +382,7 @@ Run OpenClaw commands as the agent user with `oc …` from your admin account (i
 | Sandbox runs fail with "image not found" | Image missing; OpenClaw never substitutes a plain Debian image | `sudo pi/60-images.sh` |
 | Agent can't write files in its workspace | `sandbox.docker.user` not `0:0` under rootless Docker | `openclaw config get agents.defaults.sandbox.docker.user`; rerun `70-configure.sh`; `openclaw sandbox recreate --all --force` |
 | A binary crashes with a page-size error | Pi 5's 16K-page kernel | Add `kernel=kernel8.img` to `/boot/firmware/config.txt` (4K pages), reboot |
-| Builder can't install packages | DNS blocked by egress, or MagicDNS took over `/etc/resolv.conf` | Check `DNS_SERVERS`; `sudo systemctl restart openclaw-egress` (adds 100.100.100.100 automatically) |
+| Builder can't install packages | DNS blocked by egress, or MagicDNS took over `/etc/resolv.conf` | Check `DNS_SERVERS`; `sudo systemctl restart openclaw-egress` (allows MagicDNS, 100.100.100.100, whenever Tailscale is installed) |
 | `devices join-code` refuses to mint | No advertised HTTPS endpoint | Confirm Serve is up (`tailscale serve status`); otherwise set `gateway.publicOrigin` to `https://<PI_TAILNET_NAME>` |
 | Node enrolls but exec is denied everywhere | Approvals document stricter than expected, or not set | `openclaw approvals get --node lab-exec`; `sudo pi/80-nodes.sh finish` |
 | `computer` tool missing for lab | No pairing update approved, or tool policy not applied | `sudo pi/80-nodes.sh status` → `approve <id>`; then `finish` |
@@ -371,6 +393,8 @@ Run OpenClaw commands as the agent user with `oc …` from your admin account (i
 | Every lab command shows a card, even `git` or `ls`; Allow Always unavailable | The Pi's `ask: "always"` applies to the lab agent, or the allowlist uses bare names, or the agent called a bare name | `oc approvals get --gateway` should show `agents.lab` with `ask=on-miss`; the node allowlist should list `/usr/bin/...` paths; the agent should use full paths (`config/lab-AGENTS.md`) |
 | `exec denied: request-failed` after a card | Seen on the lab node when two commands ran at once and when a card expired after 30 minutes (test 12, 2026-11-01); a denied card shows `user-denied`. It was also seen twice right after clicking Allow, not yet explained and unreproducible since. The real error isn't logged | Ask for one command at a time. If it follows an Allow, note the time and how long you took to click, run `oc approvals pending` straight away, and check the Gateway log around that time |
 | `SYSTEM_RUN_DENIED: approval cannot safely bind …` | A chain (`&&`, pipe) or inline interpreter code sent to the node | One plain command per request; put multi-step work in a script file |
+| `Could not resolve host` as `oclab`, but names resolve as `labadmin` | The lab egress rules allow DNS only to `LAB_DNS_SERVERS`; Tailscale made MagicDNS (100.100.100.100) the resolver, and the old rules only noticed it if `resolv.conf` named it at the moment they were applied (not true at boot). Seen 2026-11-19 | Now automatic whenever Tailscale is installed. On an older checkout: `LAB_DNS_SERVERS="<resolver> 100.100.100.100"` in `settings.env`, then `sudo pi/20-egress.sh oclab "<resolvers>" "<PI_TAILNET_IP>:443"` (use the real address, not a placeholder: a bad entry makes the service fail and can leave the chain half-built). Check with `sudo iptables -S OC_EGRESS \| grep "dport 53"` |
+| After updating the lab node: "Client credential migration is incomplete or stale; run openclaw doctor --fix" | 2026.11.5 moves the client's identity and tokens into a SQLite store, and client commands refuse to run until it's imported | Stop the node, run `openclaw doctor --fix` as `oclab`, start the node (phase 8, *Updating the lab node in place*) |
 | `spawn … EACCES` when running `openclaw` as `oclab` | `sudo -u` kept a folder `oclab` can't enter | Add `cd ~` first (phase 8, *Running commands as the lab user*) |
 | `uname`-style command ran on the lab without a card | Lab exec mode is `auto`, so the reviewer approved it | `oc config set agents.entries.lab.tools.exec.mode ask` |
 | `70-configure.sh` stops at "Drift policy" with "plugin policy admitted work did not settle within 60s" | An agent turn (for example an open Control UI session) holds the plugin, so the Gateway can't swap in a new plugin generation. Seen on 2026.11.5 when `plugins enable policy` ran on an already-enabled plugin; the script now skips the enable in that case | Close Control UI tabs or end the running turn, then rerun `sudo pi/70-configure.sh`. If it recurs: `oc plugins reload policy --wait` (blocks new agent runs for up to 10 minutes) |

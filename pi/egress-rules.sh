@@ -47,9 +47,21 @@ apply() { # apply <iptables|ip6tables> <family>
   $ipt -w -A "$chain" -j RETURN
 }
 
-# Tailscale MagicDNS resolver lives in 100.64.0.0/10; allow DNS to it if it's in use.
-grep -q '^nameserver 100.100.100.100' /etc/resolv.conf 2>/dev/null && dns="$dns 100.100.100.100"
-grep -q '^nameserver fd7a:115c:a1e0::53' /etc/resolv.conf 2>/dev/null && dns="$dns fd7a:115c:a1e0::53"
+# Tailscale MagicDNS lives in 100.64.0.0/10 (and a ULA range), which this chain rejects, so DNS to it
+# must be allowed explicitly. Do it when resolv.conf names it AND whenever Tailscale is installed:
+# at boot this script can run before tailscaled has rewritten resolv.conf, and then the agent user
+# had no DNS at all (seen on the lab VM, 2026-11-19). DNS port only; nothing else on the tailnet opens.
+resolv="${OC_RESOLV_CONF:-/etc/resolv.conf}"
+if command -v tailscale >/dev/null 2>&1 || grep -q '^nameserver 100.100.100.100' "$resolv" 2>/dev/null; then
+  dns="$dns 100.100.100.100"
+fi
+if command -v tailscale >/dev/null 2>&1 || grep -q '^nameserver fd7a:115c:a1e0::53' "$resolv" 2>/dev/null; then
+  dns="$dns fd7a:115c:a1e0::53"
+fi
+# Drop repeats (an explicit entry plus the automatic one) so each rule is written once.
+uniq_words() { local seen=" " w out=""; for w in "$@"; do [[ "$seen" == *" $w "* ]] && continue; seen+="$w "; out+="${out:+ }$w"; done; printf '%s' "$out"; }
+# shellcheck disable=SC2086  # $dns is a space-separated list on purpose
+dns="$(uniq_words $dns)"
 
 apply iptables 4
 command -v ip6tables >/dev/null && apply ip6tables 6

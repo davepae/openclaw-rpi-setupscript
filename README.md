@@ -256,7 +256,7 @@ secret goes in this file.
 | `ADMIN_USER` | `pi` | Your human admin account (has sudo) |
 | `OC_USER` | `openclaw_user` | The unprivileged agent account |
 | `TIMEZONE` | `America/Chicago` | Any name from `timedatectl list-timezones` |
-| `DNS_SERVERS` | `192.168.50.1` | Resolvers the agent account may reach (port 53). Tailscale's MagicDNS is added automatically when in use |
+| `DNS_SERVERS` | `192.168.50.1` | Resolvers the agent account may reach (port 53). Tailscale's MagicDNS (100.100.100.100, port 53 only) is added automatically when Tailscale is installed or `resolv.conf` names it |
 | `EGRESS_ALLOW_HOSTS` | *(empty)* | LAN services the agent account may reach, as `ip:port` (TCP), such as a local LLM server. A bare IP opens every port and phase 2 warns about it |
 | `TS_TAG_PI` / `TS_TAG_LAB` | `tag:openclaw-pi` / `tag:openclaw-lab` | Tailscale tags. Define them in your tailnet policy first |
 | `PI_TAILNET_NAME` / `PI_TAILNET_IP` | *(empty)* | Filled in after phase 4 |
@@ -505,6 +505,8 @@ These came up with the lab exec node:
 | `exec denied: request-failed` | Seen on the lab node when two commands ran at once and when a card expired after 30 minutes (test 12). A card you deny shows `user-denied` instead. It was also seen twice right after clicking Allow, without a logged cause and unreproducible since. Ask for one command at a time; if it follows an Allow, note the time and run `oc approvals pending` straight away |
 | `SYSTEM_RUN_DENIED: approval cannot safely bind …` | A chain or inline interpreter code sent to the node. One plain command per request; use a script file for multi-step work |
 | `spawn … EACCES` running `openclaw` as the lab user | `sudo -u` kept a folder the lab user can't enter. Add `cd ~` first |
+| `Could not resolve host` as the lab user, but fine as the admin user | The lab egress rules allowed DNS only to `LAB_DNS_SERVERS`, and Tailscale made MagicDNS (100.100.100.100) the resolver. Fixed in the script (it now allows MagicDNS whenever Tailscale is installed); on an older checkout add `100.100.100.100` to `LAB_DNS_SERVERS` and rerun `sudo pi/20-egress.sh <lab user> "<resolvers>" "<Pi tailnet IP>:443"` |
+| After updating the lab node, client commands say "Client credential migration is incomplete or stale" | 2026.11.5 moves the client's identity into a SQLite store. Stop the node and run `openclaw doctor --fix` as the lab user, then start it (runbook, phase 8, *Updating the lab node in place*) |
 
 ## What's been tested
 
@@ -514,6 +516,7 @@ These came up with the lab exec node:
 | All scripts | `bash -n` and `shellcheck -S warning` clean |
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01, and 37/37 on 2026.11.5 on 2026-11-19 (the Pi was updated through the Control UI; phases 7 and 10 were rerun). Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Model registration, new verify checks (model, context window, inactive profile, version warning) | Unit-tested with a stubbed `openclaw` (`tests/models-test.sh`, 41 cases; `tests/policy-test.sh`, 8 cases). **Ran on the Pi on 2026-11-19 (2026.11.5):** model registration (iq3_xxs added at 131072; a second run changed nothing), the stale-hash re-lock, and `99-verify` at 37 of 37 checks, with the version warning shown as intended. The exact shape of `config get models.providers.<id>.models --json` and `models auth list` output on a real install is assumed; `config patch --dry-run` runs before the real patch |
+| Lab egress DNS and in-place lab node update | **Ran on the lab VM on 2026-11-19.** The 2026.10.9 node was updated in place to 2026.11.5 and stayed paired (same device ID, allowlist unchanged, allowlisted `ls` ran silently, `whoami` raised a card). `oclab` had lost DNS because Tailscale made MagicDNS the resolver; the explicit `LAB_DNS_SERVERS` entry survived a reboot. The script change that allows MagicDNS whenever Tailscale is installed is unit-tested (`tests/egress-test.sh`, 17 cases) but has not run on hardware |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
 | Acceptance test 14 | Office to PDF passed 2026-11-01 (each about a second; layout correct). PDF to DOCX lost formatting (known LibreOffice limitation). Tested with small files; memory with large files not yet checked |
@@ -530,6 +533,7 @@ install-pi.sh                 runs the Pi phases in order (--from NN to redo fro
 lib/common.sh                 shared helpers (as_user, render, write_file, logging)
 lib/models.sh                 custom-provider model registration and checks (used by phase 7 and 99-verify)
 tests/models-test.sh          unit tests for lib/models.sh with a stubbed openclaw; run it anywhere with bash and jq
+tests/egress-test.sh          unit tests for pi/egress-rules.sh with stubbed iptables; needs no root
 config/
   settings.env.example        every setting; copy to settings.env
   openclaw.patch.json5        the OpenClaw policy (agents, sandbox, tools, gateway)
