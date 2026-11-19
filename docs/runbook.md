@@ -261,7 +261,7 @@ Then set `OPENCLAW_VERSION` in the VM's `config/settings.env` yourself, so a reb
 What to expect, from the 2026-11-19 run:
 
 - **`approvals get` may refuse with "Client credential migration is incomplete or stale".** Stop the node, run `oc_lab '~/.openclaw/bin/openclaw doctor --fix'`, then start it. On that run there were no legacy identity files (`~/.openclaw/identity` didn't exist) and the credential store reported `schema=1, pending=0`, so the pairing was untouched. Doctor saved a pre-migration copy of the state database (`~/.openclaw/state/openclaw.sqlite.pre-startup-migration-….bak`) and `openclaw.json.bak`; keep them until the node has reconnected.
-- **Doctor also changed things you didn't ask for:** it disabled three skills that can't run on the VM (`openai-whisper-api`, `sherpa-onnx-tts`, `trello`), refreshed the plugin registry, and **added a local `gateway.auth` token (mode `token`) to `openclaw.json`**, which the pre-doctor backup didn't have. Nothing listens for it on the VM (`ss -ltnp` showed no OpenClaw listeners), but the lab agent can read the file because `cat` is on the allowlist. Which doctor step writes it isn't confirmed. Removing it (`openclaw config unset gateway.auth`) hasn't been tested on a node.
+- **Doctor also changed things you didn't ask for:** it disabled three skills that can't run on the VM (`openai-whisper-api`, `sherpa-onnx-tts`, `trello`), refreshed the plugin registry, and **added a local `gateway.auth` token (mode `token`) to `openclaw.json`**, which the pre-doctor backup didn't have. Nothing listens for it on the VM (`ss -ltnp` showed no OpenClaw listeners), but the lab agent can read the file because `cat` is on the allowlist. **Decision (2026-11-19): left in place.** Which doctor step writes it isn't confirmed. Removing it (`openclaw config unset gateway.auth`) hasn't been tested on a node.
 - **Doctor messages that don't apply to a node:** "gateway.mode is unset; gateway start will be blocked" (don't set it; this VM isn't a Gateway), the memory-search and heartbeat notices, and the Telegram, WhatsApp and channel-owner suggestions.
 - **A "state database is busy / offline maintenance" error straight after the node starts** is the node's own startup maintenance; wait a minute and retry.
 - **Check from the Pi:** `sudo pi/80-nodes.sh status` should show `lab-exec` connected on the new version with the same device ID and nothing pending. Then run the lab acceptance test (an allowlisted `/usr/bin/ls` runs with no card; `/usr/bin/whoami` raises one, which you deny).
@@ -274,6 +274,8 @@ sudo pi/80-nodes.sh join
 # Lab VM
 sudo lab/30-desktop-node.sh      # builds lab-desktop:trixie, paste the URL at the prompt
 ```
+
+The script builds the image first (about three minutes on the VM) and only then asks for the join URL, so run `sudo pi/80-nodes.sh join` when the prompt appears, not before. Rerunning `sudo lab/30-desktop-node.sh` later (after bumping `OPENCLAW_VERSION`) rebuilds the image and keeps the pairing volume, so no join URL is needed; `--re-enroll` starts a fresh pairing. The image has Chromium, openbox and Mousepad but no terminal emulator on purpose (the desktop menu's "Terminal emulator" entry does nothing). The container reaches the Pi over the VM's tailnet address, so `nodes status` shows `lab-desktop` and `lab-exec` with the same IP.
 
 The container runs in the lab user's rootless Docker with all capabilities dropped, `no-new-privileges`, and 4 GB / 2 CPU / 1,024 PID caps. Pairing state lives in the `lab-desktop-state` volume. On each start it does three things before connecting:
 
@@ -469,6 +471,8 @@ sudo pi/70-configure.sh      # re-lock the policy hash after config changes
 ```
 
 No SSRF allowlist entry is needed: OpenClaw allows private `http://` addresses for these plugins' base URLs by itself.
+
+**Reviewed 2026-11-19 (2026.11.6):** `plugins list` showed 17 of 77 bundled and installed plugins enabled, exactly the 17 on the list below; the other 60 bundled ones are disabled. Trimming was considered and declined: all 17 stay. Firecrawl and SearXNG are installed separately (from ClawHub), so a core upgrade doesn't move them; see *Update installed plugins* in Day-2 operations.
 
 **Pin the plugin list.** Installed plugins trigger the audit warning `plugins.extensions_no_allowlist`. `plugins.allow` is exclusive, so it must name every plugin the Gateway loads, built-in ones included. Copy the list from the Gateway's startup line, set it, and restart. The count should stay the same. On 2026-10-31 that was 17 plugins:
 
