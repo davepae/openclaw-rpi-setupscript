@@ -77,18 +77,22 @@ running="$(ver_extract "$ver")"
 if [[ "${OPENCLAW_VERSION_CHECK:-1}" != 0 ]]; then
   latest="$(npm_doc latest | jq -r '.version // empty' 2>/dev/null || true)"
   if [[ -n "$latest" && "$(ver_cmp "${running:-$OPENCLAW_VERSION}" "$latest")" == -1 ]]; then
-    warn "OpenClaw $latest is out (running ${running:-unknown}, pinned $OPENCLAW_VERSION). Review it with: pi/bump-version.sh"
+    if [[ "$(ver_cmp "$OPENCLAW_VERSION" "$latest")" == -1 ]]; then
+      warn "OpenClaw $latest is out (running ${running:-unknown}, pinned $OPENCLAW_VERSION). Review it with: pi/bump-version.sh"
+    else
+      warn "OpenClaw $latest is out and already pinned, but the Pi runs ${running:-an unknown version}. Update it (Control UI update button, or sudo ./install-pi.sh --from 50), then run: sudo pi/70-configure.sh"
+    fi
   fi
 fi
 
 # Lab nodes that are connected right now: warn when one reports a different OpenClaw version than the Pi.
-# (Read from 'nodes list --json'; a disconnected node's last-known version can be stale, so it's skipped.)
+# (Read from 'nodes list --json' via node_versions_tsv; a disconnected node's last-known version can be stale, so it's skipped.)
 if [[ -n "$running" ]]; then
   while IFS=$'\t' read -r nname nver; do
     nv="$(ver_extract "$nver")"
     [[ -n "$nv" && "$(ver_cmp "$nv" "$running")" != 0 ]] \
       && warn "node '$nname' reports OpenClaw $nv but the Pi runs $running. Keep them close: runbook phase 8, 'Updating the lab node in place'"
-  done < <(oc_json 'nodes list --json' | jq -r '.paired[]? | select(.connected == true) | [(.displayName // .nodeId), (.coreVersion // "")] | @tsv' 2>/dev/null)
+  done < <(node_versions_tsv "$(oc_json 'nodes list --json')")
 fi
 
 echo; log "Security audit summary"
