@@ -282,6 +282,8 @@ mirror the change in the patch or the next phase-7 run will undo it.
 
 > **After any OpenClaw upgrade, run `sudo pi/70-configure.sh`.** That includes the Control UI's update button. An upgrade changes the attested policy, so the drift policy stops matching until 70 re-locks it, and `sudo pi/99-verify.sh` warns when the running version differs from `OPENCLAW_VERSION`, when npm has a newer release, or when a connected lab node is on a different version. Then update `OPENCLAW_VERSION` in `config/settings.env` to match (`pi/bump-version.sh --apply` does that, after a report).
 
+> **Keeping the version pin current.** `sudo pi/99-verify.sh` warns when npm has a newer release (and when a connected lab node is on a different version), `pi/bump-version.sh` reviews it, and `sudo lab/update-node.sh --to <version>` updates the lab node and writes the pin into the lab VM's own `settings.env`. The full path of `lab/update-node.sh` is unit-tested but hasn't run for real; **the next lab update is its first real run**, so read its output and check `pi/80-nodes.sh status` and `pi/99-verify.sh` afterwards. Steps: runbook, *Day-2 operations*.
+
 ## Verifying the install
 
 `sudo pi/99-verify.sh` runs 37 automated checks:
