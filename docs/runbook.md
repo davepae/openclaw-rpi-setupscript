@@ -237,18 +237,26 @@ If OpenClaw offers to update during such a command, pick **Exit**. Updates are d
 
 **Lab VM on Proxmox.** This build's lab VM is a Debian 13 VM on Proxmox VE (free edition) on the main LAN, because one switch doesn't support VLANs. Its egress firewall (`OC_EGRESS`, owner-matched to the lab user) still blocks private addresses except DNS and the Pi's tailnet IP, so the agent's commands and containers can't reach the rest of the LAN. Nothing stops the rest of the LAN from reaching the VM, though. Until a VLAN is possible, the Proxmox VE firewall (included in the free edition) can close that gap: enable it at the datacenter level and on the VM and its network device, set the VM's inbound policy to DROP, and allow only SSH from your admin machine. Tailscale connects outbound, so the Pi can still reach the node (direct connections may fall back to a relay unless UDP 41641 is allowed in). *Not yet tested here.* Read Proxmox's firewall documentation before turning on the datacenter firewall, because it also filters the Proxmox host itself. Snapshot the VM before and after phase 8.
 
-**Updating the lab node in place** (done 2026-11-19, 2026.10.9 → 2026.11.5). The Pi and the lab node don't have to match, but keep them close; `pi/99-verify.sh` only checks the Pi. This keeps the pairing, device ID and approvals, so it needs no join URL. As `labadmin` on the VM, with `oc_lab` defined as in the previous section:
+**Updating the lab node in place** (done by hand on 2026-11-19, 2026.10.9 → 2026.11.5, then 11.6). The Pi and the lab node don't have to match, but keep them close; `pi/99-verify.sh` warns when a connected lab node is on a different version. This keeps the pairing, device ID and approvals, so it needs no join URL. As `labadmin` on the VM, from the repository:
 
 ```bash
 # Lab VM
+sudo lab/update-node.sh --to 2026.11.6     # or no argument: update to the OPENCLAW_VERSION already in settings.env
+```
+
+The script checks the release's Node `engines` range against `NODE_VERSION`, stops the node, reruns `install-cli.sh --version … --no-onboard`, starts it, and waits for the state database to stop being busy. If client commands report the credential migration, it asks before running `openclaw doctor --fix` (with the node stopped). It confirms the running version, and only then writes it into **this VM's** `config/settings.env`, which `pi/bump-version.sh` on the Pi can't reach. A failed update leaves the pin alone. If the node already runs the version, it just syncs the pin. It needs `oclab` to resolve `openclaw.ai` and the npm registry; see the DNS row under Troubleshooting. It is unit-tested with stubs (`tests/lab-update-test.sh`) and has not yet run on the VM.
+
+The same steps by hand, if you need them (with `oc_lab` defined as in the previous section):
+
+```bash
 oc_lab() { sudo -u oclab -H env XDG_RUNTIME_DIR=/run/user/$(id -u oclab) bash -lc "cd ~; $*"; }
 oc_lab '~/.openclaw/bin/openclaw node stop'
-oc_lab "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --prefix \$HOME/.openclaw --version 2026.11.5 --node-version 24.22.1 --no-onboard"
+oc_lab "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --prefix \$HOME/.openclaw --version 2026.11.6 --node-version 24.22.1 --no-onboard"
 oc_lab '~/.openclaw/bin/openclaw node start'
 oc_lab '~/.openclaw/bin/openclaw approvals get'
 ```
 
-Set `OPENCLAW_VERSION` in the VM's `config/settings.env` to match, so a rebuild gets the same version. The installer needs `oclab` to resolve `openclaw.ai` and the npm registry; see the DNS row under Troubleshooting if it can't.
+Then set `OPENCLAW_VERSION` in the VM's `config/settings.env` yourself, so a rebuild gets the same version.
 
 What to expect, from the 2026-11-19 run:
 
@@ -363,7 +371,7 @@ Run OpenClaw commands as the agent user with `oc …` from your admin account (i
 | Cut computer use only | Add `gateway.nodes.commands.deny: ["computer.act"]` (`openclaw config patch --stdin`) |
 | Turn elevated off again | `oc config unset tools.elevated.allowFrom`, then `sudo pi/70-configure.sh` to restart and re-lock (setting `ENABLE_ELEVATED="0"` alone doesn't remove it) |
 | Rebuild images now | `sudo pi/60-images.sh --rebuild && sudo -iu openclaw_user openclaw sandbox recreate --all --force` |
-| Upgrade OpenClaw | Review the new release with `pi/bump-version.sh` (report only: it checks `NODE_VERSION` against the release's `engines` and shows what changed in `Dockerfile.common`), read the release notes, then `pi/bump-version.sh --apply` to move `OPENCLAW_VERSION` (`--channel beta` or `extended-stable` for another dist-tag). On the Pi run `sudo ./install-pi.sh --from 50`; on the lab VM either update in place (phase 8, *Updating the lab node in place*) or rerun `lab/20-exec-node.sh` with a fresh join URL and `lab/30-desktop-node.sh` (keeps pairing). Then `sudo pi/70-configure.sh` to re-lock the policy hashes. **Don't skip this:** until it runs, the drift policy won't match the new version. The Control UI's update button also updates the Pi in place (that's how it reached 2026.10.9); if you use it, update the lab node to the same version by hand and rerun `70-configure.sh` |
+| Upgrade OpenClaw | Review the new release with `pi/bump-version.sh` (report only: it checks `NODE_VERSION` against the release's `engines` and shows what changed in `Dockerfile.common`), read the release notes, then `pi/bump-version.sh --apply` to move `OPENCLAW_VERSION` (`--channel beta` or `extended-stable` for another dist-tag). On the Pi run `sudo ./install-pi.sh --from 50`; on the lab VM run `sudo lab/update-node.sh --to <version>` (phase 8, *Updating the lab node in place*; it also writes the pin into the VM's own `settings.env`) or rerun `lab/20-exec-node.sh` with a fresh join URL and `lab/30-desktop-node.sh` (keeps pairing). Then `sudo pi/70-configure.sh` to re-lock the policy hashes. **Don't skip this:** until it runs, the drift policy won't match the new version. The Control UI's update button also updates the Pi in place (that's how it reached 2026.10.9); if you use it, update the lab node to the same version by hand and rerun `70-configure.sh` |
 | Stop update notices | `oc config set update.checkOnStart false` stops the Gateway's daily version check and its update prompts. Automatic updates are already off by default (`update.auto.enabled`), and the lab node's self-update is off (`nodeHost.autoUpdate.enabled false`) |
 | Answer a lab card from the terminal | `oc approvals pending`; `oc approvals resolve <id> allow-once` (or `deny`) |
 | Change the lab allowlist | Edit `config/approvals-lab-exec.json5` (full paths that exist on both the VM and the Pi), then `oc approvals set --node lab-exec --file config/approvals-lab-exec.json5` |

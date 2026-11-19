@@ -91,5 +91,15 @@ node_versions_tsv() {
     | @tsv' <<<"$1" 2>/dev/null
 }
 
+# settings_set <file> <KEY> <value>: rewrite the one KEY="..." line in place (keeps the file's owner and
+# mode, and any trailing comment). Returns non-zero and leaves the file alone unless exactly one such line exists.
+settings_set() {
+  local file="$1" key="$2" val="$3" new
+  [[ "$(grep -c "^$key=\"" "$file")" == 1 ]] || return 1
+  new="$(sed -E "s/^($key=)\"[^\"]*\"/\\1\"$val\"/" "$file")" || return 1
+  [[ "$(grep -c "^$key=\"$val\"" <<<"$new")" == 1 ]] || return 1
+  printf '%s\n' "$new" >"$file"
+}
+
 # settings_value <file> <KEY>: the value of KEY="..." in a settings file, read without sourcing it.
 settings_value() { sed -n -E "s/^$2=\"?([^\"# ]*)\"?.*/\\1/p" "$1" | head -1; }
