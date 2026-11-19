@@ -4,6 +4,7 @@
 # except for throwaway test containers.
 source "$(dirname "$0")/../lib/common.sh"
 source "$(dirname "$0")/../lib/models.sh"
+source "$(dirname "$0")/../lib/versions.sh"
 require_root
 trap - ERR; set +e
 pass=0; fail=0
@@ -69,6 +70,25 @@ t "egress service active"      "systemctl is-active openclaw-egress.service"
 ver="$(oc '--version' 2>/dev/null | head -1)"
 if [[ "$ver" != *"$OPENCLAW_VERSION"* ]]; then
   warn "running '${ver:-unknown}' but OPENCLAW_VERSION is $OPENCLAW_VERSION. After an upgrade, set OPENCLAW_VERSION to the new version and run: sudo pi/70-configure.sh (re-locks the drift policy)"
+fi
+
+# Newer release on npm? One short lookup, never counted as a failure; OPENCLAW_VERSION_CHECK="0" skips it.
+running="$(ver_extract "$ver")"
+if [[ "${OPENCLAW_VERSION_CHECK:-1}" != 0 ]]; then
+  latest="$(npm_doc latest | jq -r '.version // empty' 2>/dev/null || true)"
+  if [[ -n "$latest" && "$(ver_cmp "${running:-$OPENCLAW_VERSION}" "$latest")" == -1 ]]; then
+    warn "OpenClaw $latest is out (running ${running:-unknown}, pinned $OPENCLAW_VERSION). Review it with: pi/bump-version.sh"
+  fi
+fi
+
+# Lab nodes that are connected right now: warn when one reports a different OpenClaw version than the Pi.
+# (Read from 'nodes list --json'; a disconnected node's last-known version can be stale, so it's skipped.)
+if [[ -n "$running" ]]; then
+  while IFS=$'\t' read -r nname nver; do
+    nv="$(ver_extract "$nver")"
+    [[ -n "$nv" && "$(ver_cmp "$nv" "$running")" != 0 ]] \
+      && warn "node '$nname' reports OpenClaw $nv but the Pi runs $running. Keep them close: runbook phase 8, 'Updating the lab node in place'"
+  done < <(oc_json 'nodes list --json' | jq -r '.paired[]? | select(.connected == true) | [(.displayName // .nodeId), (.coreVersion // "")] | @tsv' 2>/dev/null)
 fi
 
 echo; log "Security audit summary"

@@ -252,7 +252,8 @@ secret goes in this file.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.11.5` / `24.22.1` | Pinned versions. Bump them deliberately and retest |
+| `OPENCLAW_VERSION` / `NODE_VERSION` | `2026.11.5` / `24.22.1` | Pinned versions. Review a newer release with `pi/bump-version.sh` (report only), move the pin with `--apply`, then retest |
+| `OPENCLAW_VERSION_CHECK` | `1` | `99-verify` looks up npm's newest release and warns when it's newer than what runs. `0` skips the lookup (offline) |
 | `ADMIN_USER` | `pi` | Your human admin account (has sudo) |
 | `OC_USER` | `openclaw_user` | The unprivileged agent account |
 | `TIMEZONE` | `America/Chicago` | Any name from `timedatectl list-timezones` |
@@ -279,7 +280,7 @@ secret goes in this file.
 Arrays in `config/openclaw.patch.json5` replace what's there, so if you change a list by hand,
 mirror the change in the patch or the next phase-7 run will undo it.
 
-> **After any OpenClaw upgrade, run `sudo pi/70-configure.sh`.** That includes the Control UI's update button. An upgrade changes the attested policy, so the drift policy stops matching until 70 re-locks it, and `sudo pi/99-verify.sh` warns when the running version differs from `OPENCLAW_VERSION`. Then update `OPENCLAW_VERSION` in `config/settings.env` to match.
+> **After any OpenClaw upgrade, run `sudo pi/70-configure.sh`.** That includes the Control UI's update button. An upgrade changes the attested policy, so the drift policy stops matching until 70 re-locks it, and `sudo pi/99-verify.sh` warns when the running version differs from `OPENCLAW_VERSION`, when npm has a newer release, or when a connected lab node is on a different version. Then update `OPENCLAW_VERSION` in `config/settings.env` to match (`pi/bump-version.sh --apply` does that, after a report).
 
 ## Verifying the install
 
@@ -288,7 +289,7 @@ mirror the change in the patch or the next phase-7 run will undo it.
 - **Identity:** no rootful Docker socket or daemon, no sudo or docker group, rootless with systemd cgroups, file modes.
 - **Exposure:** loopback-only listeners, Serve active, Funnel off, no chat channels, `allowTailscale: false`, config validates.
 - **Policy:** sandbox mode `all`, Gateway approvals `ask: always` with `askFallback: deny`, no policy drift.
-- **Models:** the configured primary and PDF models are registered on the custom provider, the registered context window matches `CUSTOM_CONTEXT_WINDOW`, and no inactive auth profile is left over from an onboarding rerun. It also warns, without counting a failure, when the running version differs from `OPENCLAW_VERSION`.
+- **Models:** the configured primary and PDF models are registered on the custom provider, the registered context window matches `CUSTOM_CONTEXT_WINDOW`, and no inactive auth profile is left over from an onboarding rerun. It also warns, without counting a failure, when the running version differs from `OPENCLAW_VERSION`, when npm has a newer release (`OPENCLAW_VERSION_CHECK="0"` skips that lookup), and when a connected lab node reports a different version than the Pi.
 - **Egress:** throwaway containers prove that `network: none` has no network, and a bridge container can't reach the LAN gateway or `100.100.100.100` but can reach the internet.
 
 Expected audit output: **0 critical**, with two warnings to accept. `gateway.trusted_proxies_missing`
@@ -517,6 +518,7 @@ These came up with the lab exec node:
 | Pi phases 0–7, 9, 10 | Run end to end on a Pi 5 (16 GB, NVMe), 2026-10-31: 34/34 checks passed; 34/34 again after the update to 2026.10.9 on 2026-11-01, and 37/37 on 2026.11.5 on 2026-11-19 (the Pi was updated through the Control UI; phases 7 and 10 were rerun). Phase 9b was set up by hand on the same Pi on 2026-11-01 and then scripted |
 | Model registration, new verify checks (model, context window, inactive profile, version warning) | Unit-tested with a stubbed `openclaw` (`tests/models-test.sh`, 41 cases; `tests/policy-test.sh`, 8 cases). **Ran on the Pi on 2026-11-19 (2026.11.5):** model registration (iq3_xxs added at 131072; a second run changed nothing), the stale-hash re-lock, and `99-verify` at 37 of 37 checks, with the version warning shown as intended. The exact shape of `config get models.providers.<id>.models --json` and `models auth list` output on a real install is assumed; `config patch --dry-run` runs before the real patch |
 | Lab egress DNS and in-place lab node update | **Ran on the lab VM on 2026-11-19.** The 2026.10.9 node was updated in place to 2026.11.5 and stayed paired (same device ID, allowlist unchanged, allowlisted `ls` ran silently, `whoami` raised a card). `oclab` had lost DNS because Tailscale made MagicDNS the resolver; the explicit `LAB_DNS_SERVERS` entry survived a reboot. The script change that allows MagicDNS whenever Tailscale is installed is unit-tested (`tests/egress-test.sh`, 17 cases) but has not run on hardware |
+| Version pin tooling (`pi/bump-version.sh`, the `99-verify` version warnings) | `tests/versions-test.sh`, 54 cases, no network. **Ran for real, read-only, on 2026-11-19:** the report against npm and GitHub (`latest` was 2026.11.6; Node range satisfied; `Dockerfile.common` byte-identical to 2026.11.5; the beta channel showed a real diff), and the `99-verify` warning block with stubbed inputs. **Not yet run:** `pi/99-verify.sh` itself on the Pi, and `--apply` against a real `settings.env`. The lab-node check reads `nodes list --json` (`paired[].connected`, `coreVersion`), taken from the 2026.11.5 source, not seen on a live Gateway |
 | Backups (phase 9 timer, 9b export, pull and decrypt on a Mac) | Worked on 2026-11-01. Full restore onto a rebuilt Pi not tested |
 | Acceptance tests 1, 2, 3, 6, 9, 11, 12, 13 | Passed, 2026-10-31 and 2026-11-01. Test 6: inline code refused on the lab node. Test 9: `main` couldn't change config or install a plugin, and `plugins.allow` was unchanged. Test 12: an unanswered lab card expired after 30 minutes and nothing ran (the agent saw `request-failed` rather than a timeout). Test 13: `/exec security=full ask=off` couldn't skip cards on the lab node |
 | Acceptance test 14 | Office to PDF passed 2026-11-01 (each about a second; layout correct). PDF to DOCX lost formatting (known LibreOffice limitation). Tested with small files; memory with large files not yet checked |
@@ -532,8 +534,10 @@ These came up with the lab exec node:
 install-pi.sh                 runs the Pi phases in order (--from NN to redo from a phase)
 lib/common.sh                 shared helpers (as_user, render, write_file, logging)
 lib/models.sh                 custom-provider model registration and checks (used by phase 7 and 99-verify)
+lib/versions.sh               version compare, engines-range check, npm and GitHub lookups (used by bump-version and 99-verify)
 tests/models-test.sh          unit tests for lib/models.sh with a stubbed openclaw; run it anywhere with bash and jq
 tests/egress-test.sh          unit tests for pi/egress-rules.sh with stubbed iptables; needs no root
+tests/versions-test.sh        unit tests for lib/versions.sh and pi/bump-version.sh against file:// fixtures; no network
 config/
   settings.env.example        every setting; copy to settings.env
   openclaw.patch.json5        the OpenClaw policy (agents, sandbox, tools, gateway)
@@ -544,7 +548,7 @@ config/
   policy.jsonc                drift policy (hash-locked by phase 7)
   tailnet-policy.hujson       Tailscale tags and grants fragment
 images/Dockerfile.dev         sandbox dev image (toolchains plus Office/PDF tooling)
-pi/                           Pi phases 00–99 (95 = encrypted backup export) and the egress rules script
+pi/                           Pi phases 00–99 (95 = encrypted backup export), the egress rules script and bump-version.sh (reviews and moves the version pin)
 lab/                          lab VM, exec node and desktop node scripts; lab/desktop/ is the container
 docs/runbook.md               end-to-end setup runbook
 docs/design.md                architecture and hardening design (v3)
