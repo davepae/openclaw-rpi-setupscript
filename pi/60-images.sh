@@ -4,8 +4,9 @@
 #   openclaw-sandbox-common:trixie-slim  OpenClaw's Dockerfile.common from your installed tag
 #   openclaw-sandbox-dev:trixie-slim     + toolchains and Office/PDF tools (images/Dockerfile.dev)
 #   openclaw-sandbox-browser:*           optional, BUILD_BROWSER_IMAGE=1 (source checkout)
-# Note: release tags up to v2026.10.9 still default to *:bookworm-slim and Dockerfile.common's
-# BASE_IMAGE defaults to openclaw-sandbox:bookworm-slim, so BASE_IMAGE is passed explicitly here.
+# Note: release tags up to v2026.10.9 default to *:bookworm-slim and Dockerfile.common's BASE_IMAGE
+# defaults to openclaw-sandbox:bookworm-slim; v2026.11.5 defaults to trixie. BASE_IMAGE is still passed
+# explicitly here, so either works.
 # Rerun weekly (the timer from 90-timers.sh calls this with --rebuild).
 source "$(dirname "$0")/../lib/common.sh"
 REBUILD=0; [[ "${1:-}" == "--rebuild" ]] && REBUILD=1
