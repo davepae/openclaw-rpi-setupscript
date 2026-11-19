@@ -2,6 +2,8 @@
 # Phase 7 — apply the design's openclaw.json, the Gateway host approvals document, and the
 # drift policy; then run the built-in gates. Run with sudo. Safe to rerun.
 source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/models.sh"
+source "$(dirname "$0")/../lib/policy.sh"
 require_root
 home="$(user_home "$OC_USER")"
 stage="$home/.cache/openclaw-config"; install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$stage"
@@ -20,6 +22,10 @@ log "Backing up current config"
 # Keep these config-only snapshots apart from the nightly full backups in ~/backups.
 install -d -m 700 -o "$OC_USER" -g "$OC_USER" "$(user_home "$OC_USER")/backups" "$(user_home "$OC_USER")/backups/config"
 oc "backup create --only-config --verify --output \$HOME/backups/config" || warn "config backup failed (continuing)"
+
+# Onboarding reruns use --auth-choice skip, which skips model registration. Make the provider's model
+# list match the settings before the patch below points agents at PRIMARY_MODEL / PDF_MODEL.
+models_register
 
 log "Config patch (dry run, then apply)"
 oc "config patch --file '$stage/openclaw.patch.json5' --dry-run"
@@ -42,13 +48,30 @@ oc "approvals get --gateway"
 
 log "Drift policy (bundled Policy plugin)"
 install -m 600 -o "$OC_USER" -g "$OC_USER" "$stage/policy.jsonc" "$home/workspace/policy.jsonc"
-oc "plugins enable policy"
+# Enabling an already-enabled plugin makes the Gateway swap in a new plugin generation, which waits for
+# any agent turn (for example an open Control UI session) that holds the old one and fails after 60 s.
+# So only enable it the first time.
+if [[ "$(oc 'config get plugins.entries.policy.enabled' 2>/dev/null | tail -1 || true)" == true ]]; then
+  ok "policy plugin already enabled"
+else
+  oc "plugins enable policy"
+fi
 as_user "$OC_USER" "openclaw config patch --stdin" <<'EOF'
 { plugins: { entries: { policy: { enabled: true, config: { enabled: true, path: "policy.jsonc", workspaceRepairs: false } } } } }
 EOF
 as_user "$OC_USER" "systemctl --user restart openclaw-gateway.service"; sleep 8
 check="$(as_user "$OC_USER" "openclaw policy check --agent main --json" 2>/dev/null || true)"
 okv="$(jq -r '.ok' <<<"$check" 2>/dev/null || echo false)"
+# A config change or an upgrade changes the attestation, so the old accepted hashes stop matching and the
+# check fails on that alone. If the hash mismatch is the only finding, drop the stale locks and check again;
+# the lock is re-applied below. Any other finding still stops the script.
+if [[ "$okv" != "true" ]] && policy_only_stale_hashes "$check"; then
+  warn "accepted policy hashes are stale (config change or upgrade); clearing them and checking again. Old attestation: $(oc 'config get plugins.entries.policy.config.expectedAttestationHash' 2>/dev/null | tail -1 | tr -d '"')"
+  as_user "$OC_USER" "openclaw config unset plugins.entries.policy.config.expectedHash" || true
+  as_user "$OC_USER" "openclaw config unset plugins.entries.policy.config.expectedAttestationHash" || true
+  check="$(as_user "$OC_USER" "openclaw policy check --agent main --json" 2>/dev/null || true)"
+  okv="$(jq -r '.ok' <<<"$check" 2>/dev/null || echo false)"
+fi
 if [[ "$okv" == "true" ]]; then
   ph="$(jq -r '.attestation.policy.hash' <<<"$check")"; ah="$(jq -r '.attestation.attestationHash' <<<"$check")"
   as_user "$OC_USER" "openclaw config patch --stdin" <<EOF
