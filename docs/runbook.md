@@ -398,6 +398,18 @@ A string `model` has no fallbacks, so if Copilot fails the agent stops rather th
 
 **4. Test.** Verified 2026-11-19: `main` answered a web-search question through the Gateway's search with sourced results and no raw `<tool_call>` text; `builder` wrote and syntax-checked a script. `oc models status --agent main` keeps reporting "Auth readiness could not be confirmed" for the model even with the Gateway running; that is the status command's limit, so judge by a live call and by the usage on your GitHub Copilot billing page.
 
+**5. Fix the built-in heartbeat job.** `main`'s "Heartbeat (main)" automation keeps the inference account it was created with ("inference account continuity"). After `main` moved to Copilot it failed with "Automation has no recorded inference account", and the `strata` account it had before is refused for a Copilot-run agent ("incompatible with its recorded inference account and route"). I did not get `--model strata/...@strata:<profile>` to work: it was rejected with "invalid cron.update params: MCP authorization was disconnected or replaced", and I don't know why. What worked, with the job id from `oc automations list`, one command at a time:
+
+```bash
+oc automations list
+oc automations edit <heartbeat-job-id> --model github-copilot/mai-code-2@github-copilot:github --every 12h
+oc automations edit <heartbeat-job-id> --no-failure-alert
+oc automations edit <heartbeat-job-id> --no-deliver
+oc automations run <heartbeat-job-id>
+```
+
+`--every 12h` keeps the Copilot usage of the heartbeat low (a run cost about 27k uncached plus 61k cached tokens). `--no-deliver` sets `delivery.mode` to "none", which clears the "waiting for delivery route" line in `oc status`. Recording the Copilot account is sticky, and I found no working way back to `strata` (see the rejected edit above). The red triangle on `main` in the Control UI is cosmetic and none of these edits cleared it.
+
 **Not verified:** GitHub's terms for third-party clients that use the Copilot API (OpenClaw uses the same catalog endpoint as VS Code); and billing. Third-party reports say monthly Copilot plans moved to token-metered "AI Credits" on 2026-06-01 and that MAI Code 2 is $0.50 in / $2.50 out per million tokens until 2027-05-17, but check your own plan and usage page. An agent loop can use a month of credits quickly.
 
 ## Day-2 operations
