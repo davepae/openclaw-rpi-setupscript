@@ -35,6 +35,7 @@ Tailscale tailnet, and need your approval for every command that runs on the Pi 
 - [Backups](#backups)
 - [Optional: elevated mode](#optional-elevated-mode)
 - [Optional: self-hosted search (SearXNG and Firecrawl)](#optional-self-hosted-search-searxng-and-firecrawl)
+- [Optional: GitHub Copilot models](#optional-github-copilot-models)
 - [Troubleshooting](#troubleshooting)
 - [What's been tested](#whats-been-tested)
 - [Repository layout](#repository-layout)
@@ -541,6 +542,10 @@ is needed, because OpenClaw allows private `http://` base URLs for these plugins
 
 **Remaining risk:** `builder` can also reach the Firecrawl port, and Firecrawl fetches whatever URL it's given,
 including LAN addresses. Limit that host's own LAN access on your router, or skip Firecrawl.
+
+## Optional: GitHub Copilot models
+
+The scripts set up the local model for every agent. To run `main` and `builder` on a cloud model through your GitHub Copilot plan, follow *Optional: GitHub Copilot models for `main` and `builder`* in [docs/runbook.md](docs/runbook.md). It's a manual step: enable the bundled `github-copilot` plugin (it must go on `plugins.allow`), log in with the Gateway stopped, and set `agents.entries.<id>.model` per agent. Re-running `pi/70-configure.sh` keeps it. Billing and GitHub's terms for third-party clients aren't verified; read the notes there first.
 
 ## Troubleshooting
 

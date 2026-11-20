@@ -361,6 +361,45 @@ It then prints the audit findings and the manual tests below.
 | 14 | main: convert a real DOCX, XLSX and PPTX to PDF | PDFs correct, within the memory cap. PDF back to DOCX isn't supported by LibreOffice's default import (it opens PDFs as drawings); a text-only fallback loses formatting. Use your largest real files to check memory |
 | 15 | lab: screenshot, open Mousepad from the right-click menu (Applications), type a line | Computer tool works; no shell. Passed 2026-11-19. The image has no terminal emulator, so the menu's "Terminal emulator" entry does nothing; before Mousepad was added to the image the agent looped looking for an editor |
 
+## Optional: GitHub Copilot models for `main` and `builder`
+
+Set up and tested 2026-11-19 on 2026.11.6. `main` and `builder` run `github-copilot/mai-code-2`; `reader` and `lab` stay on the local model (`strata`). Nothing here is applied by the scripts: the login is interactive and tied to your GitHub account, and `70-configure.sh` neither sets `plugins.allow` nor a per-agent `model`, so re-running it leaves this in place.
+
+Why Copilot and not the Claude CLI: the `github-copilot` provider calls the Copilot API directly, so there is no vendor binary on the Pi outside the sandbox. OpenClaw's Claude CLI route runs Claude Code on the Gateway host, and the docs say that is "argument-level policy applied to the command Claude Code will run, not sandboxed execution by OpenClaw."
+
+**1. Enable the plugin.** The provider is bundled but disabled, and `plugins.allow` is exclusive, so `plugins enable` fails with "blocked by allowlist" until the id is on the list. Add `github-copilot` (18 ids now; compare against your live list first, because `config set` replaces the whole array):
+
+```bash
+oc config get plugins.allow
+oc config set plugins.allow '["anthropic","browser","canvas","cua-computer","device-pair","file-transfer","firecrawl","geolocation","github","github-copilot","linux-node","memory-core","ollama","openai","policy","searxng","talk-voice","xai"]' --strict-json
+oc plugins enable github-copilot
+```
+
+**2. Log in.** The device flow needs an interactive terminal, the Gateway stopped, and an agent id. Without `--agent` it says "Multiple agents are configured… Pass --agent <id>"; before the plugin is enabled it says "No provider plugins found". Don't use `--set-default`: that would make Copilot the default for every agent. Run these one at a time, not pasted as a block:
+
+```bash
+sudo -u openclaw_user env XDG_RUNTIME_DIR=/run/user/$(id -u openclaw_user) systemctl --user stop openclaw-gateway.service
+oc models auth login-github-copilot --agent main
+```
+
+Open the printed URL on any device and enter the code. The auth store is one SQLite file, so `builder` saw the same `github-copilot:github` profile without a second login.
+
+**3. Find the model id and set it.** The catalog is per account. With the Gateway stopped, `models list` shows a stale cache; `--refresh` fetches it:
+
+```bash
+oc models list --all --agent main --refresh | grep -i github-copilot
+oc config set agents.entries.main.model '"github-copilot/mai-code-2"' --strict-json
+oc config set agents.entries.builder.model '"github-copilot/mai-code-2"' --strict-json
+oc config get agents.defaults.model     # still the local model
+sudo -u openclaw_user env XDG_RUNTIME_DIR=/run/user/$(id -u openclaw_user) systemctl --user start openclaw-gateway.service
+```
+
+A string `model` has no fallbacks, so if Copilot fails the agent stops rather than silently moving to the local model. Change is picked up without a restart.
+
+**4. Test.** Verified 2026-11-19: `main` answered a web-search question through the Gateway's search with sourced results and no raw `<tool_call>` text; `builder` wrote and syntax-checked a script. `oc models status --agent main` keeps reporting "Auth readiness could not be confirmed" for the model even with the Gateway running; that is the status command's limit, so judge by a live call and by the usage on your GitHub Copilot billing page.
+
+**Not verified:** GitHub's terms for third-party clients that use the Copilot API (OpenClaw uses the same catalog endpoint as VS Code); and billing. Third-party reports say monthly Copilot plans moved to token-metered "AI Credits" on 2026-06-01 and that MAI Code 2 is $0.50 in / $2.50 out per million tokens until 2027-05-17, but check your own plan and usage page. An agent loop can use a month of credits quickly.
+
 ## Day-2 operations
 
 Run OpenClaw commands as the agent user with `oc …` from your admin account (installed by phase 5), or from a shell opened with `sudo -iu openclaw_user`.
@@ -491,7 +530,7 @@ oc config set plugins.allow '["anthropic","browser","canvas","cua-computer","dev
 oc gateway restart
 ```
 
-After this, the audit shows only the two expected warnings, `trusted_proxies_missing` and `probe_failed`.
+After this, the audit shows only the two expected warnings, `trusted_proxies_missing` and `probe_failed`. If you enable Copilot (see *Optional: GitHub Copilot models*), the list gains `github-copilot` and the count is 18.
 
 **3. Test it.** In the Control UI, ask `main` to have `reader` search for something current and summarize the top result. Verified on 2026-10-31: `main` delegated to `reader`, which searched, fetched the article and returned a sourced summary.
 
