@@ -435,6 +435,7 @@ Run OpenClaw commands as the agent user with `oc …` from your admin account (i
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
+| Control UI shows "Assistant" instead of an agent's name | The agent has no `identity.name`; the runtime default is "Assistant". Seen 2026-11-19 on `builder`, `reader` and `lab` (`oc config get agents.entries.<id>.identity` said "unset") | The config patch now sets it. On an older install: `oc config set agents.entries.<id>.identity.name '"<id>"' --strict-json`, then reload the UI. Applies without a restart |
 | `/run/user/<uid> missing` from any script | Linger not on, or the user manager isn't up yet | `sudo loginctl enable-linger openclaw_user`; wait a few seconds, rerun |
 | `docker info` warns "No memory limit support" | Memory cgroup off in the Pi kernel | Add `cgroup_enable=memory cgroup_memory=1` to `/boot/firmware/cmdline.txt`, reboot |
 | Cgroup driver `cgroupfs`, limits ignored | Delegation drop-in missing | Check `/etc/systemd/system/user@.service.d/delegate.conf`, `systemctl daemon-reload`, reboot |
