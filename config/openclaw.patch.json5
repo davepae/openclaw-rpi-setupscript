@@ -45,6 +45,8 @@
     },
     entries: {
       main: {
+        // Without identity.name the Control UI labels an agent "Assistant" (builder, reader and lab did, until 2026-11-19).
+        identity: { name: "main" },
         workspace: "@@OC_HOME@@/workspace",
         subagents: { allowAgents: ["builder", "reader", "lab"] },
         // pdf is in no tool profile, and sandboxed agents also filter it — allow it in both layers.
@@ -55,11 +57,13 @@
         // GitHub identity for main: set up in RUNBOOK phase 9 (needs a generated profileId first).
       },
       builder: {
+        identity: { name: "builder" },
         workspace: "@@OC_HOME@@/workspace",
         sandbox: { docker: { network: "bridge" } },     // behind the owner-match egress rules
         tools: { elevated: { enabled: false } },
       },
       reader: {
+        identity: { name: "reader" },
         workspace: "@@OC_HOME@@/reader",
         sandbox: { workspaceAccess: "none" },
         tools: {
@@ -73,6 +77,7 @@
         },
       },
       lab: {
+        identity: { name: "lab" },
         workspace: "@@OC_HOME@@/lab",
         // mode "ask": allowlisted full-path binaries run silently; every other command gets a card.
         // ("auto" would let the built-in reviewer approve low/medium-risk one-offs without asking.)
