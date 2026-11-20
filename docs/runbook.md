@@ -398,6 +398,17 @@ A string `model` has no fallbacks, so if Copilot fails the agent stops rather th
 
 **4. Test.** Verified 2026-11-19: `main` answered a web-search question through the Gateway's search with sourced results and no raw `<tool_call>` text; `builder` wrote and syntax-checked a script. `oc models status --agent main` keeps reporting "Auth readiness could not be confirmed" for the model even with the Gateway running; that is the status command's limit, so judge by a live call and by the usage on your GitHub Copilot billing page.
 
+**5. Fix the built-in heartbeat job.** Changing `main`'s model breaks `Heartbeat (main)`, an OpenClaw automation that runs every 30 minutes in `main`'s session. It has no model of its own, so it follows `main`, and the first run after the switch failed with "Automation has no recorded inference account". A job keeps the inference account it was last given, and a different provider is refused ("Automation candidate strata … is incompatible with its recorded inference account"). Trying `--model strata/…@strata:<profile>` on the same job was rejected with "invalid cron.update params: MCP authorization was disconnected or replaced"; the cause isn't known. What worked (2026-11-19):
+
+```bash
+oc automations list
+oc automations edit <heartbeat-id> --model github-copilot/mai-code-2@github-copilot:github --every 12h
+oc automations edit <heartbeat-id> --no-failure-alert     # no chat channels, so alerts can't be delivered
+oc automations run <heartbeat-id> && sleep 30 && oc automations runs <heartbeat-id> --limit 1
+```
+
+Left on Copilot at 30 minutes, the heartbeat sent the whole `main` session (about 56k uncached tokens on the first run, 27k uncached plus 61k cached on the second) 48 times a day. At the third-party rates above that is roughly $1.35 a day at the first run's size, so the cadence is now 12 hours. Delivery to an owner chat fails with "no-route" because there are no chat channels; that is expected and not an error. If you'd rather not run it, `oc automations disable <heartbeat-id>` is reversible.
+
 **Not verified:** GitHub's terms for third-party clients that use the Copilot API (OpenClaw uses the same catalog endpoint as VS Code); and billing. Third-party reports say monthly Copilot plans moved to token-metered "AI Credits" on 2026-06-01 and that MAI Code 2 is $0.50 in / $2.50 out per million tokens until 2027-05-17, but check your own plan and usage page. An agent loop can use a month of credits quickly.
 
 ## Day-2 operations
